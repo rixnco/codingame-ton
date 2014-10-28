@@ -22,7 +22,7 @@ public class SurvivalStrategy implements Strategy {
 		int xy= grid.head(forPlayer);
 		int area= grid.fillableAreaAt(xy);
 		
-		if(Constants.DEBUG) {
+		if(Constants.DEBUG_SURVIVAL) {
 			System.out.println("Survial search P"+forPlayer+" ("+Grid.getX(xy)+","+Grid.getY(xy)+")");
 			System.out.println("fillable Area: "+area);
 		}
@@ -31,35 +31,37 @@ public class SurvivalStrategy implements Strategy {
 		Move best= null;
 		try {
 		for (itr= 1; itr<=maxDepth; itr++) {
-			if(Constants.DEBUG) {
+			if(Constants.DEBUG_SURVIVAL) {
 				System.out.println("Depth "+itr);
 			}
 			maxitr= itr;
 			Move m= spacefill(present, grid, forPlayer, itr, dog);
 			if (best==null || m.value>best.value) {
 				best= m;
+				present.future.remove(m);
+				present.future.addFirst(m);
 			}
 			if (dog.panic) break;
 			if(m==null) continue;
 			if (m.value<=itr) {
-				if(Constants.DEBUG) {
+				if(Constants.DEBUG_SURVIVAL) {
 					System.out.println("What the fuck does that mean !!!: "+m.value+"<="+itr);
 				}
 				break; // we can't possibly search any deeper TODO ???
 			}
 			if (m.value>=area) {
-				if(Constants.DEBUG) {
+				if(Constants.DEBUG_SURVIVAL) {
 					System.out.println("We found the perfect match !!"+m.value+"="+area);
 				}
 				break; // solved!
 			}
 		}
 		} catch(Timeout t) {
-			if(Constants.DEBUG) {
+			if(Constants.DEBUG_SURVIVAL) {
 				System.out.println("Timeout !!");
 			}
 		}
-		if(true || Constants.DEBUG) {
+		if(Constants.DEBUG_SURVIVAL) {
 			System.out.println("Survival mode P"+forPlayer+" depth="+maxitr+" Move "+(best==null?"???":best.dir[forPlayer]));
 		}
 		return best;
@@ -74,56 +76,51 @@ public class SurvivalStrategy implements Strategy {
 		return null;
 	}
 	
-	
-	
-	
 	// returns spaces unused (wasted); idea is to minimize waste
 	// Evaluate present's heuristic and returns best future move or null is no future
 	static public Move spacefill(final Move present, final Grid g, final int player, final int itr, final Watchdog dog) throws Timeout {
 		
 		dog.check();
-		int xy= g.head(player);
-		assert(xy>=Grid.FIRST && xy<=Grid.LAST);
+		final int head= g.head(player);
+		assert(head>=Grid.FIRST && head<=Grid.LAST);
 		try {
-		if (g.degree(xy)==0) {
+		if (g.degree(head)==0) {
 			present.eval= 0;
 			present.value= 0;
-			if(Constants.DEBUG) {
-				GridUtils.dump(g);
-				System.out.println("P"+player+" ("+Grid.getX(xy)+","+Grid.getY(xy)+")");
+			if(Constants.DEBUG_SURVIVAL) {
+				Utils.dump(g);
+				System.out.println("P"+player+" ("+Grid.getX(head)+","+Grid.getY(head)+")");
 				System.out.println("--> no more space");
 			}
 			return null;
 		}
 		} catch(ArrayIndexOutOfBoundsException e) {
 			System.out.println("Player: "+player);
-			GridUtils.dump(g);
-			GridUtils.dumpComponents(g);
-			GridUtils.dumpTerritory(g);
+			Utils.dump(g);
+			Utils.dumpComponents(g);
+			Utils.dumpTerritory(g);
 			throw e;
 		}
 		
 		if (itr==0) {
 			// We're evaluating present
 			if(present.eval==null) {
-				present.eval= floodfill(g, xy, dog);
-				if(Constants.DEBUG) {
-					GridUtils.dump(g);
-					System.out.println("P"+player+" ("+Grid.getX(xy)+","+Grid.getY(xy)+")");
+				present.eval= floodfill(g, head, dog);
+				if(Constants.DEBUG_SURVIVAL) {
+					Utils.dump(g);
+					System.out.println("P"+player+" "+Grid.toXYString(head));
 					System.out.println("-->floodfill="+present.eval);
 				}
 			}
 			present.value=present.eval;
 			return null;
 		}
-
-		
 		
 		if (present.future.size()==0) {
 			// present has never been evaluated
 			// populate future
 			for (Direction d : Direction.ALL) {
-				if(!g.empty(xy, d)) continue;
+				if(!g.empty(head, d)) continue;
 				Move m= new Move(player, d);
 				present.addFuture(m);
 			}
@@ -136,19 +133,30 @@ public class SurvivalStrategy implements Strategy {
 		int spacesleft= g.getPlayerFillableArea(player);
 		Move bestf= null;
 		for (Move f : present.future) {
-			try {
-				f.move(g);
-				spacefill(f, g, player, itr-1, dog);
-			} finally {
-				f.unmove(g);
+			f.move(g);
+			spacefill(f, g, player, itr-1, dog);
+			f.unmove(g);
+			if (bestf==null || f.value>=bestf.value) {
+				if(bestf!=null && f.value==bestf.value){
+					// If moves are equals, choose the one removing the least degree of freedom
+					if(g.degree(f.move(head, player))<g.degree(bestf.move(head, player))) {
+						bestf=f;
+					}
+				} else {
+					bestf= f;
+				}
 			}
-			if (bestf==null || f.value>bestf.value) {
-				bestf= f;
-			}
-			if (f.value==spacesleft) break; // we solved it!
+			if (f.value==spacesleft) 
+				break; // we solved it!
 			dog.check();
 		}
-		present.value= (bestf==null?0:bestf.value);
+		if(bestf!=null) {
+			present.future.remove(bestf);
+			present.future.addFirst(bestf);
+			present.value= bestf.value;
+		} else {
+			present.value=0;
+		}
 		return bestf;
 	}
 
@@ -171,15 +179,12 @@ public class SurvivalStrategy implements Strategy {
 		if (bestv==0) return 0;
 		int a;
 		boolean recalc=false;
-		try {
-			g.grid[b]= 1;
-			g.removeFromComponents(b, true);
-			a= 1+floodfill(g, b, dog);
-			recalc=true;
-		} finally {
-			g.grid[b]= 0;
-			g.addToComponents(b, recalc);
-		}
+		g.grid[b]= 1;
+		g.removeFromComponents(b, true);
+		a= 1+floodfill(g, b, dog);
+		recalc=true;
+		g.grid[b]= 0;
+		g.addToComponents(b, recalc);
 		return a;
 	}
 

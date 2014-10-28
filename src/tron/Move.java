@@ -66,6 +66,10 @@ public class Move {
 		}
 		return g;
 	}
+
+	public int move(int xy, int player) {
+		return xy+dir[player].step;
+	}
 	
 	public Grid unmove(Grid g) {
 		if(player!=-1) {

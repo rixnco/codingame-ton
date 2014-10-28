@@ -2,6 +2,7 @@ package tron;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 
 import tron.Grid.Color;
@@ -31,8 +32,15 @@ public class TerritoryStrategy implements Strategy {
 		//TODO: find a way to keep a copy of the latest present evaluation before timeout
 		Grid g= grid.copy();
 		
+		LinkedList<Integer> opponents= new LinkedList<>();
+		g.calculateComponents(true);
+		int c= g.playerComponent(forPlayer);
+		for(int p= g.nextPlayer(forPlayer); p!=forPlayer; p=g.nextPlayer(p)) {
+			if(c==g.playerComponent(p)) opponents.add(p);
+		}
+
 		if(DEBUG) {
-			System.out.println("Territory mode P"+forPlayer+" ("+Grid.getX(g.head(forPlayer))+","+Grid.getY(g.head(forPlayer))+")");
+			System.out.println("Territory mode P"+forPlayer+" against "+opponents.toString());
 		}
 		
 		int itr;
@@ -46,7 +54,7 @@ public class TerritoryStrategy implements Strategy {
 				if(DEBUG) {
 					System.out.println("Depth "+itr);
 				}
-				Move m= _alphabeta(g, forPlayer/*, forPlayer*/, MIN, MAX, (2*itr)-1, present, dog,"");
+				Move m= _alphabeta(g, forPlayer, opponents, MIN, MAX, (2*itr)-1, present, dog,"");
 				best= m;
 				maxitr= itr;
 				if (present.value==MIN) {
@@ -90,7 +98,7 @@ public class TerritoryStrategy implements Strategy {
 				System.out.println("Timeout !!");
 			}
 		}
-		if(true || DEBUG) {
+		if(DEBUG) {
 			System.out.println("Territory mode P"+forPlayer+" depth="+maxitr+" Move "+(best==null?"???":best.dir[forPlayer]));
 		}
 		return best;
@@ -98,8 +106,15 @@ public class TerritoryStrategy implements Strategy {
 
 	@Override
 	public Integer evaluate(final Grid g, final int player) {
+		LinkedList<Integer> opponents= new LinkedList<>();
+		g.calculateComponents(true);
+		int c= g.playerComponent(player);
+		for(int p= g.nextPlayer(player); p!=player; p=g.nextPlayer(p)) {
+			if(c==g.playerComponent(p)) opponents.add(p);
+		}
+
 		try {
-			return evaluate_board(g, player, Watchdog.createInfinite());
+			return evaluate_board(g, player, opponents, Watchdog.createInfinite());
 		} catch (Timeout t) {
 		}
 		return null;
@@ -108,7 +123,7 @@ public class TerritoryStrategy implements Strategy {
 	// do an iterative-deepening search on all moves and see if we can find a
 	// move
 	// sequence that cuts off our opponent
-	Move _alphabeta(Grid g, int forPlayer/*, int player*/, int a, int b, int itr, final Move present, final Watchdog dog, String tab) throws Timeout {
+	Move _alphabeta(Grid g, int forPlayer, LinkedList<Integer> opponents, int a, int b, int itr, final Move present, final Watchdog dog, String tab) throws Timeout {
 		dog.check();
 
 		++ab_runs;
@@ -128,19 +143,22 @@ public class TerritoryStrategy implements Strategy {
 			}
 			return null;
 		}
+
 		
-		if (g.remainingPlayers==1) {
-			// No more opponents !!!
-
-			present.eval= MAX; //g.alive[forPlayer]?Integer.MAX_VALUE:Integer.MIN_VALUE;
-			present.value= present.eval; //g.alive[forPlayer]?Integer.MAX_VALUE:Integer.MIN_VALUE;
-			if(DEBUG_TERRITORY_MINIMAX) {
-//				GridUtils.dump(g);
-				System.out.println(tab+"  --> no more competitor(s)");
+		for(int p: opponents) {
+			if (!g.alive(p)) {
+				// At least one opponent died!!!
+	
+				present.eval= MAX; 
+				present.value= present.eval; 
+				if(DEBUG_TERRITORY_MINIMAX) {
+	//				GridUtils.dump(g);
+					System.out.println(tab+"  --> At least one opponent died");
+				}
+				return null;
 			}
-			return null;
 		}
-
+		
 		// last iteration?
 		if (itr==0) {
 			// We're evaluating present if not already done !!
@@ -148,7 +166,7 @@ public class TerritoryStrategy implements Strategy {
 				if(DEBUG_TERRITORY_MINIMAX) {
 					System.out.println(tab+"-->evaluating "+present);
 				}
-				present.eval= evaluate_board(g, forPlayer, dog);
+				present.eval= evaluate_board(g, forPlayer, opponents, dog);
 				if(DEBUG_TERRITORY_MINIMAX) {
 //					GridUtils.dump(g);
 					System.out.println(tab+"-->P"+forPlayer+" ("+Grid.getX(g.head(forPlayer))+","+Grid.getY(g.head(forPlayer))+")");
@@ -159,94 +177,89 @@ public class TerritoryStrategy implements Strategy {
 			return null;
 		}
 
+		boolean maximize=(itr&1)==1;
+
 		if (present.future.isEmpty()) {
 			// No future yet. build it
-			if(g.nextPlayer()==forPlayer) {
+			if(maximize) {
 				int xy=g.head(forPlayer);
 				for (Direction d : Direction.ALL) {
 					if(!g.empty(xy,d)) continue;
 					present.addFuture(new Move(forPlayer, d));
 				}
-			} else {
-////				System.out.println(tab+"  --> Building opponent future of "+present);
-//				int xy=g.head(player);
-//				for(Direction d: Direction.ALL) {
-//					if(!g.empty(xy,d)) continue;
-//					Move m= new Move(player, d);
-////					System.out.println(tab+"  --> adding "+m);
-//					present.addFuture(m);
-//				}
-//				if(present.future.isEmpty()) {
-////					System.out.println(tab+"  --> player P"+player+" will die");
-//					present.addFuture(new Move(player, Direction.UP));
-//				}
-
-				//int comp= g.playerComponent(forPlayer);
-				buildFuture(g.nextPlayer(), forPlayer, g, null, present.future);
-			}
-			
-			if (present.future.isEmpty()) {
-				if (g.nextPlayer()==forPlayer) {
-					// No future for forPlayer
-					present.eval= MIN;
+				if(present.future.isEmpty()) {
+					// NO FUTURE FOR MAX PLAYER !!!
+					present.eval=MIN;
 					present.value= MIN;
 					if(DEBUG_TERRITORY_MINIMAX) {
 						System.out.println(tab+"-->No future for P"+forPlayer);
 					}
 					return null;
 				}
-				// opponent(s) will die
-				if(DEBUG_TERRITORY_MINIMAX) {
-					System.out.println(tab+"-->Opponent will die (P"+g.nextPlayer()+")");
+			} else {
+
+				present.future= buildFuture(opponents, g);
+					
+				if(present.future.isEmpty()) {
+					// NO FUTURE FOR ONE OPPONENT !!!
+					present.eval=MAX;
+					present.value= MAX;
+					if(DEBUG_TERRITORY_MINIMAX) {
+						System.out.println(tab+"-->No future for one opponent");
+					}
+					return null;
 				}
-				present.addFuture(new Move(g.nextPlayer(), Direction.UP));
-			}
-		} else {
-			// Sort future
-//			Collections.sort(present.future, maximize?Move.BEST_FIRST:Move.BEST_LAST);
-//			if(DEBUG_TERRITORY_MINIMAX) {
-//				System.out.println(tab+"-->Sorting future "+(maximize?"max first":"min first"));
-//			}
-			Collections.sort(present.future, Move.BEST_LAST);
-			if(DEBUG_TERRITORY_MINIMAX) {
-				System.out.println(tab+"-->Sorting future");
+				
 			}
 		}
-
-		// periodically check timeout. if we do time out, give up, we can't do
-		// any
-		// more work; whatever we found so far will have to do
-//		Move best= null;
-//		int bestv;
-//		int nextp= g.nextPlayer();
 		
+		// Sort Future
+		Collections.sort(present.future, maximize?Move.BEST_FIRST:Move.BEST_LAST);
+		if(DEBUG_TERRITORY_MINIMAX) {
+			System.out.println(tab+"-->Sorting future");
+		}
+
 		Move minimax=null;
-		int  minimaxv= MIN;
+		int  minimaxv= maximize?MAX:MIN;
 		
 		for (Move m : present.future) {
 			// move player
-			try {
-				m.move(g);
-				_alphabeta(g, forPlayer/*, nextp*/, -b, -a, itr-1, m, dog, tab+"  ");
-			} finally {
-				m.unmove(g);
-			}
+			m.move(g);
+			_alphabeta(g, forPlayer, opponents, a, b, itr-1, m, dog, tab+"  ");
+			m.unmove(g);
 			dog.check();
-			m.value=m.value;
-			int val= m.value;
-			if (minimax==null || val>minimaxv) {
-				minimax= m;
-				minimaxv=val;
-				if(minimaxv>a) {
-					a=minimaxv;
-					if (a>=b) {
-						// beta cutoff
-						if(DEBUG_TERRITORY_MINIMAX) {
-							System.out.println(tab+"-->beta cutoff");
-						}	
-						break;
+			if(maximize) {
+				// Maximizing 
+				
+				if(minimax==null || minimaxv<=m.value) {
+					if(minimax!=null && minimaxv==m.value) {
+						// Choose move with lowest degree
+						int head= g.head(forPlayer);
+						if(g.degree(minimax.dir[forPlayer].move(head))>g.degree(m.dir[forPlayer].move(head))) {
+							minimax= m;
+						}
+					} else {
+						minimax=m;
+						minimaxv= m.value;
 					}
 				}
+				if(minimaxv>=b) {
+					// Beta pruning
+					break;
+				}
+				a= a>minimaxv?a:minimaxv;
+			} else {
+				// Minimizing
+				if(minimax==null || minimaxv>m.value) {
+					minimax=m;
+					minimaxv= m.value;
+				}
+				if(minimaxv<=a) {
+					// Alpha pruning
+					break;
+				}
+				b= b<minimaxv?b:minimaxv;
+				
 			}
 
 		}
@@ -257,70 +270,73 @@ public class TerritoryStrategy implements Strategy {
 		return minimax;
 	}
 
-	private void buildFuture(int player, int forPlayer, Grid g, Move present, List<Move> future) {
-		if(player==forPlayer) {
-			if(present!=null) {
-//				System.out.println("Adding future "+present);
-				future.add(present);
+	private LinkedList<Move> buildFuture(LinkedList<Integer> opponents, Grid g) {
+		
+		LinkedList<Move> present= new LinkedList<>();
+		LinkedList<Move> future= new LinkedList<>();
+		LinkedList<Move> tmp;
+		
+		future.add(new Move());
+		for(int p:opponents) {
+			tmp=present;
+			present=future;
+			future=tmp;
+			future.clear();
+			
+			int count=0;
+			for(Move m: present) {
+				m.move(g);
+				int head= g.head(p);
+				for(Direction d:Direction.ALL) {
+					if(!g.empty(head, d)) continue;
+					++count;
+					future.add(new Move(m).append(p,d));
+				}
+				m.unmove(g);
 			}
-			return;
+			if(count==0) {
+				// Opponent p will die anyway
+				future.clear();
+				return future;
+			}
 		}
-		int xy=g.head(player);
-		int count=0;
-		Move m;
-		for (Direction d : Direction.ALL) {
-			if(!g.empty(xy,d)) continue;
-			++count;
-			m= new Move(present).append(player, d);
-			buildFuture(g.nextPlayer(player), forPlayer, g, m, future);
-		}
-		if(count==0) {
-			// Player is going to die
-//			System.out.println("Killing P"+player);
-			m= new Move(present).append(player, Direction.UP);
-			buildFuture(g.nextPlayer(player), forPlayer, g, m, future);
-		}
+		
+		return future;
 	}
 	
 	
-	private int evaluate_board(final Grid g, final int player, final Watchdog dog) throws Timeout {
-
+	private int evaluate_board(final Grid g, final int player, LinkedList<Integer> opponents, final Watchdog dog) throws Timeout {
 		// remove players from the board when evaluating connected components,
 		// because if a player is separating components he still gets to choose
 		// which
 		// one to move into.
-		g.calculateComponents(); // compute present's components
+		g.calculateComponents(true); // compute present's components
 
 		if(DEBUG_TERRITORY) {
-			GridUtils.dumpComponents(g);
+			Utils.dumpComponents(g);
 		}
 		
 		++evaluations;
 
-		// follow the maximum territory gain strategy until we partition
-		// space or crash
-		int comp= g.playerComponent(player);
-		int p;
-		for (p= g.nextPlayer(player); p!=player; p= g.nextPlayer(p)) {
-			if (comp==g.playerComponent(p)) {
-				// We have to fight for territory
-				if(DEBUG_TERRITORY) {
-					System.out.println("Need to fight for territory");
-				}
-				int v= evaluate_territory(g, player);
-				return v;
+		if(opponents.size()>0) {
+			if(DEBUG_TERRITORY) {
+				System.out.println("Need to fight for territory");
 			}
+			int v= evaluate_territory(g, player, opponents);
+			return v;
 		}
-
+		
+		if(DEBUG_TERRITORY) {
+			System.out.println("Need to fill in our territory");
+		}
 		// Build articulated space for all players
 		g.resetArticulations();
 		int v;
 		int ff0;
 		int ffmax;
 		int maxp;
-		try {
 		g.hideHeads();
-		p= player;
+		int p= player;
 		do {
 			g.calculateArticulations(g.head(p));
 		} while ((p= g.nextPlayer(p))!=player);
@@ -351,9 +367,8 @@ public class TerritoryStrategy implements Strategy {
 			}
 		}
 		v= 1000*(ff0-ffmax);
-		} finally {
-			g.restoreHeads();
-		}
+		g.restoreHeads();
+
 		// if our estimate is really close, try some searching
 		if (v!=0&&Math.abs(v)<=30000) {
 			Move present= new Move();
@@ -369,31 +384,28 @@ public class TerritoryStrategy implements Strategy {
 		return v;
 	}
 
-	private int evaluate_territory(final Grid g, int player) {
+	private int evaluate_territory(final Grid g, int player, LinkedList<Integer> opponents) {
 		g.resetTerritory();
-		int p= player;
-		int comp= g.playerComponent(player);
-		// Build territory for all player in our component
-		do {
-			if (comp!=g.playerComponent(p)) continue;
+		
+		g.calculateTerritory(g.head(player), player);
+		for(int p:opponents) {
 			g.calculateTerritory(g.head(p), p);
-		} while ((p= g.nextPlayer(p))!=player);
+		}
 
 		if(DEBUG_TERRITORY) {
-			GridUtils.dumpTerritory(g);
+			Utils.dumpTerritory(g);
 		}
 
 		// Build articulations for all player in our component
 		g.resetArticulations();
 		g.hideHeads();
-		p= player;
-		do {
-			if (comp!=g.playerComponent(p)) continue;
-			g.calculateArticulations(g.head(p));
-		} while ((p= g.nextPlayer(p))!=player);
+		g.calculateArticulations(g.head(player), g.territory);
+		for(int p:opponents) {
+			g.calculateArticulations(g.head(p), g.territory);
+		}
 
 		if(DEBUG_TERRITORY) {
-			GridUtils.dumpArticulations(g);
+			Utils.dumpArticulations(g);
 		}
 
 		// Compute remaining space
@@ -404,8 +416,7 @@ public class TerritoryStrategy implements Strategy {
 			System.out.println("nodecount("+player+")="+nodecount);
 		}
 		int ncmax=0;
-		for (p= g.nextPlayer(player); p!=player; p= g.nextPlayer(p)) {
-			if (comp!=g.playerComponent(p)) continue;
+		for(int p: opponents) {
 			Space ccount1= max_articulated_space(g, g.head(p), g.territory);
 			int nc1= K1*(ccount1.front+ccount1.fillable(Color.at(g.head(p))))+K2*ccount1.edges;
 			if(nc1>ncmax) ncmax= nc1;
@@ -467,13 +478,10 @@ public class TerritoryStrategy implements Strategy {
 			// now we need to figure out how to connect spaces via colored
 			// articulation vertices
 			// exits[i] gets counted in the child space
-			// fprintf(stderr, "space@%d,%d exit #%d steps=%d %s\n", v.x, v.y,
-			// i,
-			// steps, steps > maxsteps ? "new max" : "");
 
-//			if(DEBUG_TERRITORY) {
-//				System.out.println(tab+"space"+Grid.toXYString(v)+" exit"+Grid.toXYString(exits.get(i))+" steps="+steps+(steps>maxsteps?" new max":""));
-//			}
+			if(DEBUG_TERRITORY) {
+				System.out.println(tab+"space"+Grid.toXYString(v)+" exit"+Grid.toXYString(exits.get(i))+" steps="+steps+(steps>maxsteps?" new max":""));
+			}
 			if (steps>maxsteps) {
 				maxsteps= steps;
 				if (child.front==0) {
@@ -486,10 +494,6 @@ public class TerritoryStrategy implements Strategy {
 		if(DEBUG_TERRITORY) {
 			System.out.println(tab+"space"+Grid.toXYString(v)+" steps="+maxsteps);
 		}
-//		if(DEBUG_TERRITORY) {
-//			System.out.println("maxspace="+maxspace);
-//		}
-		
 		return maxspace;
 	}
 

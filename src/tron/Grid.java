@@ -20,16 +20,11 @@ public class Grid {
 	static public final int FIRST= WIDTH+1;
 	static public final int LAST= AREA-WIDTH-1;
 
-	static public final int MOVE_LEFT= -1;
-	static public final int MOVE_RIGHT= 1;
-	static public final int MOVE_UP= -WIDTH;
-	static public final int MOVE_DOWN= WIDTH;
-
 	// Grid state
 	public byte[] grid= new byte[AREA];
 
 	// Players state
-	public final int nbPlayers;
+	public int nbPlayers;
 	public int remainingPlayers;
 
 	public boolean[] alive= new boolean[] { false, false, false, false };
@@ -57,13 +52,11 @@ public class Grid {
 	 public int[] articd= new int[Grid.AREA];
 
 	
+	 public Grid() {
+		 this(4);
+	 }
+	 
 	public Grid(int nbPlayers) {
-		this.nbPlayers= nbPlayers;
-		this.remainingPlayers= nbPlayers;
-		for (int t= 0; t<nbPlayers; ++t) {
-			alive[t]= true;
-		}
-		;
 		for (int x= 0; x<WIDTH; ++x) {
 			grid[x]= 0x1;
 			grid[(HEIGHT-1)*WIDTH+x]= 0x1;
@@ -72,12 +65,21 @@ public class Grid {
 			grid[y*WIDTH]= 0x1;
 			grid[y*WIDTH+WIDTH-1]= 0x1;
 		}
+	}
+
+	public void setNbPlayers(int nbPlayers) {
+		this.nbPlayers= nbPlayers;
+		this.remainingPlayers= nbPlayers;
+		for (int t= 0; t<nbPlayers; ++t) {
+			alive[t]= true;
+		}
 		for (int p= 0; p<nbPlayers; ++p) {
 			cycles.add(new LinkedList<Integer>());
 		}
 		nbMoves=0;
+		player=-1;
 	}
-
+	
 	
 	protected Grid(Grid src) {
 		// Copy grid state
@@ -184,10 +186,7 @@ public class Grid {
 	}
 
 	public boolean empty(int xy, final Direction d) {
-		xy=d.move(xy);
-		if(xy<Grid.FIRST || xy>Grid.LAST)
-			return false;
-		return grid[xy]==0;
+		return grid[xy+d.step]==0;
 	}
 	
 	public boolean move(final int p, final int xy) {
@@ -204,13 +203,13 @@ public class Grid {
 			addToComponents(xy);
 			if(Constants.DEBUG_GRID) {
 				System.out.println("move P"+player+" ("+Grid.getX(xy)+","+Grid.getY(xy)+")");
-				GridUtils.dump(this);
+				Utils.dump(this);
 			}
 		} else {
 			killPlayer(p);
 			if(Constants.DEBUG_GRID) {
 				System.out.println("move P"+player+" ("+Grid.getX(xy)+","+Grid.getY(xy)+") -> killed");
-				GridUtils.dump(this);
+				Utils.dump(this);
 			}
 		}
 
@@ -221,7 +220,7 @@ public class Grid {
 	}
 
 	public boolean move(final int p, final Direction d) {
-		return move(p, d.move(head[p]));
+		return move(p, head[p]+d.step);
 	}
 
 	public boolean unmove() {
@@ -230,7 +229,7 @@ public class Grid {
 		if(!alive[player]) {
 			if(Constants.DEBUG_GRID) {
 				System.out.println("unmove P"+player+" ("+Grid.getX(head[player])+","+Grid.getY(head[player])+") -> resurected");
-				GridUtils.dump(this);
+				Utils.dump(this);
 			}
 			resurectPlayer(player);
 		} else {
@@ -241,7 +240,7 @@ public class Grid {
 			head[player]= cycles.get(player).isEmpty()?-1:cycles.get(player).getLast();
 			if(Constants.DEBUG_GRID) {
 				System.out.println("unmove P"+player+" ("+Grid.getX(head[player])+","+Grid.getY(head[player])+")");
-				GridUtils.dump(this);
+				Utils.dump(this);
 			}
 		}
 
@@ -290,12 +289,12 @@ public class Grid {
 		return xy/WIDTH;
 	}
 
-	public int head(final int p) {
+	public final int head(final int p) {
 		return (alive[p]?head[p]:0);
 	}
 
 	public int degree(final int idx) {
-		return 4-grid[idx+MOVE_LEFT]-grid[idx+MOVE_RIGHT]-grid[idx+MOVE_UP]-grid[idx+MOVE_DOWN];
+		return 4-grid[idx+Direction.LEFT.step]-grid[idx+Direction.RIGHT.step]-grid[idx+Direction.UP.step]-grid[idx+Direction.DOWN.step];
 	}
 
 	public byte isArticulation(final int idx) {
@@ -303,8 +302,14 @@ public class Grid {
 	}
 
 	private int neighborsMask(final int idx) {
-		return (grid[idx+MOVE_UP+MOVE_LEFT])|(grid[idx+MOVE_UP])<<1|(grid[idx+MOVE_UP+MOVE_RIGHT])<<2|(grid[idx+MOVE_RIGHT])<<3|(grid[idx+MOVE_DOWN+MOVE_RIGHT])<<4
-				|(grid[idx+MOVE_DOWN])<<5|(grid[idx+MOVE_DOWN+MOVE_LEFT])<<6|(grid[idx+MOVE_LEFT])<<7;
+		return (grid[idx+Direction.UP.step+Direction.LEFT.step])|
+				(grid[idx+Direction.UP.step])<<1|
+				(grid[idx+Direction.UP.step+Direction.RIGHT.step])<<2|
+				(grid[idx+Direction.RIGHT.step])<<3|
+				(grid[idx+Direction.DOWN.step+Direction.RIGHT.step])<<4|
+				(grid[idx+Direction.DOWN.step])<<5|
+				(grid[idx+Direction.DOWN.step+Direction.LEFT.step])<<6|
+				(grid[idx+Direction.LEFT.step])<<7;
 	}
 
 	private static final byte[] articulation_map= new byte[] { 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
@@ -337,8 +342,8 @@ public class Grid {
 		int idx= FIRST;
 		for(idx= FIRST; idx<=LAST; ++idx) {
 			if(grid[idx]!=0) continue;
-			int up= equiv.get(components[idx+MOVE_UP]);
-			int left= equiv.get(components[idx+MOVE_LEFT]);
+			int up= equiv.get(components[idx+Direction.UP.step]);
+			int left= equiv.get(components[idx+Direction.LEFT.step]);
 			if(up==0 && left==0) {
 				// new component;
 				equiv.add(group);
@@ -455,18 +460,6 @@ public class Grid {
 			      (red[component] >= black[component] ? 1 : 0);
 			  }
 	  }
-
-	
-	private int connectedValueFor(int component) { 
-		calculateComponents();
-		return cedges[component]; 
-	}
-	
-	private int componentAt(int idx) { return components[idx]; }
-	  
-	private int connectedAreaFor(int component) { return red[component]+black[component]; }
-	  
-	private int connectedAreaAt(int idx) { return red[components[idx]]+black[components[idx]]; }
 	  
 	
 	//	Articulations
@@ -598,34 +591,15 @@ public class Grid {
 		NONE(0), LEFT(-1), RIGHT(1), UP(-Grid.WIDTH), DOWN(Grid.WIDTH);
 
 		static final Direction[] ALL= new Direction[] { LEFT, UP, RIGHT, DOWN };
-		static final Direction[] NEXT_LEFT= new Direction[] { DOWN, UP, LEFT };
-		static final Direction[] NEXT_RIGHT= new Direction[] { UP, DOWN, RIGHT };
-		static final Direction[] NEXT_UP= new Direction[] { LEFT, RIGHT, UP };
-		static final Direction[] NEXT_DOWN= new Direction[] { RIGHT, LEFT, DOWN };
 
-		static public Direction[] next(Direction dir) {
-			switch (dir) {
-			case UP:
-				return NEXT_UP;
-			case DOWN:
-				return NEXT_DOWN;
-			case LEFT:
-				return NEXT_LEFT;
-			case RIGHT:
-				return NEXT_RIGHT;
-			default:
-				return ALL;
-			}
-		}
-
-		private int delta;
+		public final int step;
 
 		private Direction(int delta) {
-			this.delta= delta;
+			this.step= delta;
 		}
 
 		public int move(int xy) {
-			return xy==0?0:xy+delta;
+			return xy==0?0:xy+step;
 		}
 
 		static Direction fromTo(int xy0, int xy1) {

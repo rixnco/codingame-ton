@@ -5,7 +5,6 @@ import java.io.File;
 
 public class Constants {
 	// TODO:
-	// - remove tryfinally (useless as we're working on a copy of the original grid
 	// - replace minimax with negamax
 	// - add processing of all opponents in minamax
 	// - remove tab string
@@ -20,10 +19,13 @@ public class Constants {
 
 	public static final boolean DEBUG_TERRITORY= false;
 
-	public static final boolean DEBUG_TERRITORY_MINIMAX= true;
+	public static final boolean DEBUG_TERRITORY_MINIMAX= false;
+
+	public static final boolean DEBUG_SURVIVAL= false;
 
 	public static final int MAX= 100000000;
 	
 	public static final int MIN= -MAX;
+
 	
 }
