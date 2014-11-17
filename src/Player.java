@@ -44,13 +44,6 @@ final class Player {
         boolean[] alive= new boolean[] { 0<N, 1<N, 2<N, 3<N };
         boolean firstRound=true;
         Move current;
-        int maxRequestedMove=0;
-        int totalRequestedMove=0;
-        int maxCreatedMove=0;
-        int totalCreatedMove=0;
-        int maxDisposedMove=0;
-        int totalDisposedMove=0;
-        int maxPendingMove=0;
         
         while (true) {
         	System.arraycopy(XY1, 0, XY0, 0, N);
@@ -117,11 +110,16 @@ final class Player {
 			        	log.println("maxitr :"+best.depth);
 		        		break;
 		        	case TERRITORY:
-		        	    log.println("opponents:"+best.opponents);
+		        	    log.println("opponent:"+best.opponents.get(0));
 			        	log.println("maxitr :"+best.depth);
-		        		log.println("evals  :"+IA.evaluations);
+		        		log.println("evals  :"+IA.ab_evals);
 		        		log.println("ab_runs:"+IA.ab_runs);
 		        		log.println("cutoffs:"+IA.ab_cutoffs);
+		        	case FIGHT:
+		        	    log.println("opponents:"+best.opponents);
+			        	log.println("maxitr   :"+best.depth);
+		        		log.println("evals    :"+IA.maxn_evals);
+		        		log.println("maxn_runs:"+IA.maxn_runs);
 		        	}
 					log.println("dir: " + best);
 					log.println("time: " + (System.currentTimeMillis() - start));
@@ -163,28 +161,27 @@ final class IA {
 		
 		int cp= grid.playerComponent(forPlayer);
 
-		boolean survival=true;
-		for (int p= grid.nextPlayer(forPlayer); p!=forPlayer && survival; p= grid.nextPlayer(p)) {
-			survival= cp!=grid.playerComponent(p); 
-//			int xy= grid.head[p];
-//			for(Direction d: Direction.ALL) {
-//				if(grid.grid[xy+d.step]!=0) continue;
-//				int co= grid.components[xy+d.step];
-//				survival= cp!=co;
-//				if(!survival) break;
-//			}
+		List<Integer> opponents= new ArrayList<>(3);
+		for (int p= grid.nextPlayer(forPlayer); p!=forPlayer; p= grid.nextPlayer(p)) {
+			if(cp==grid.playerComponent(p)) opponents.add(p); 
 		}
 		Move m;
-		if (survival) {
+		if(opponents.isEmpty()) {
 			m= nextMoveSurvival(present, grid, forPlayer, maxDepth, dog);
+		} else if(opponents.size()==1 ){
+			m= nextMoveTerritory(present, grid, forPlayer, opponents, maxDepth, dog);
 		} else {
-			m= nextMoveTerritory(present, grid, forPlayer, maxDepth, dog);
+			m= nextMoveFight(present, grid, forPlayer, opponents, maxDepth, dog);
 		}
 		return m;
 	}
+
+	// Fight Strategy
+	public static int maxn_runs;
+	public static int maxn_evals;
 	// Territory Strategy
-	public static int evaluations;
 	public static int ab_runs;
+	public static int ab_evals;
 	public static int ab_cutoffs;
 
 	static final int K1= 55;
@@ -193,46 +190,201 @@ final class IA {
 
 	public static int maxitr=0;
 
-	
-	final static public Move nextMoveTerritory(Move present, final Grid grid, final int forPlayer, final int maxDepth, final Watchdog dog) {
+	final static public Move nextMoveFight(Move present, final Grid grid, final int forPlayer, final List<Integer> opponents, final int maxDepth, final Watchdog dog) {
 		// original grid must have been copied before calling this method as it will be messed up during processing
 
-		boolean dirty=false;
-		if(present.strategy!=Strategy.TERRITORY) {
-			dirty=true;
+		boolean dirty=present.strategy!=Strategy.FIGHT;
+		dirty|= (present.opponents!=null && !opponents.equals(present.opponents));
+		
+		if(dirty) {
+			present.reset(false);
+			present.strategy= Strategy.FIGHT;
+			present.player= forPlayer;
 		}
+		present.opponents= opponents;
 		
-		LinkedList<Integer> opponents= new LinkedList<>();
-		// Components have been calculated in nextMove()
-		int c= grid.playerComponent(forPlayer);
-		
-		for(int p= grid.nextPlayer(forPlayer); p!=forPlayer; p=grid.nextPlayer(p)) {
-			if(c==grid.playerComponent(p)) opponents.add(p);
+		int itr;
+		Move best= null;
+		ab_evals= 0;
+		maxn_runs= 0;
+		try {
+			for (itr= 1; itr<=maxDepth; itr++) {
+				Move m= maxn(present, forPlayer, opponents, grid, (2*itr)-1, dog);
+				maxitr= 2*itr-1;
+//                if(best!=null) best.dispose(false);
+//                best= Move.get(m);
+				best= m;  // Use best as is. It may be modified by next itr search, but sorting should take care of that
+				present.depth=maxitr;		
+				if (present.value==Move.MIN) {
+					// deeper searching is apparently impossible (either because
+					// there are no more moves for us
+					break;
+				}
+				if (best!=null) {
+					if (present.value==Move.MAX) {
+						// our opponent cannot move, so we win
+						break;
+					}
+				}
+				dog.check();
+			}
+		} catch (Timeout t) {
+		}
+		return best;
+	}
+	
+	// do an iterative-deepening search on all moves and see if we can find a
+	// move
+	// sequence that cuts off our opponent
+	final static Move maxn(final Move present, final int forPlayer, final List<Integer> opponents, final Grid g, int itr, final Watchdog dog) throws Timeout {
+		dog.check();
+		++maxn_runs;
+		// last iteration?
+		if (itr==0) {
+			// We're evaluating present if not already done !!
+			if (present.eval==Move.NaN) {
+				present.degree= g.degree(g.head[forPlayer]);
+				present.eval= evaluate_maxn(g, forPlayer, opponents, dog);
+			}
+			present.value= present.eval;
+			present.strategy= Strategy.FIGHT;
+			present.depth=itr;
+			present.opponents=opponents;
+			return null;
 		}
 
-//		grid.hideHeads();
-//		grid.resetTerritory();
-//		grid.calculateTerritory(forPlayer);
-//		grid.restoreHeads();
-//
-//		int nbOpponents=opponents.size();
-//		int closestP=-1;
-//		int closestD=Integer.MAX_VALUE;
-//		for(Iterator<Integer> it= opponents.iterator(); it.hasNext(); ) {
-//			final int p= it.next();
-//			final int d=grid.territory[grid.head[p]]&0xFFFF;
-//			if(d<closestD) {
-//				closestD=d;
-//				closestP=p;
-//			}
-//			//if(d>15) { it.remove(); }
-//		}
-//		if(opponents.isEmpty()) {
-//			opponents.add(closestP);
-//		}
-//	    log.println(opponents.toString());
-//		dirty|= opponents.size()!=nbOpponents;
+		boolean maximize=(itr&1)==1;
 
+		if (present.future.isEmpty()) {
+			// No future yet. build it
+			if(maximize) {
+				int xy=g.head[forPlayer];
+				for (Direction d : Direction.ALL) {
+					if(g.grid[xy+d.step]!=0) continue;
+					present.future.add(Move.get(forPlayer, d));
+				}
+				if(present.future.isEmpty()) {
+					// NO FUTURE FOR MAX PLAYER !!!
+					present.eval=Move.MIN;
+					present.value=Move.MIN;
+					present.strategy= Strategy.FIGHT;
+					present.depth=itr;
+					present.opponents=opponents;
+					return null;
+				}
+			} else {
+				present.future=buildFuture(opponents, g);
+				if(present.future.isEmpty()) {
+					// NO FUTURE FOR OPPONENTS !!!
+					present.eval=Move.MAX;
+					present.value=Move.MAX;
+					present.strategy= Strategy.FIGHT;
+					present.depth=itr;
+					present.opponents=opponents;
+					return null;
+				}
+			}
+		}
+
+		Move best=null;
+		
+		for (Move m : present.future) {
+			// move player
+			m.move(g);
+			maxn(m, forPlayer, opponents, g, itr-1, dog);
+			m.unmove(g);
+			dog.check();
+			if(best==null || IA.BEST_FIGHT_FIRST.compare(best, m)>0) {
+				best= m;
+			}
+		}
+		present.value= best.value;
+		present.strategy= Strategy.FIGHT;
+		present.depth=itr;
+		present.opponents=opponents;
+		return best;
+	}
+	
+	final static private MoveList buildFuture(final List<Integer> opponents, final Grid g) {
+		MoveList present= new MoveList();
+		MoveList future= new MoveList();
+		MoveList tmp;
+		
+		future.add(Move.get());
+		for(int p:opponents) {
+			if(!g.alive[p]) continue;
+			tmp=present;
+			present=future;
+			future=tmp;
+			future.clear();
+			
+			for(Move m: present) {
+				m.move(g);
+				int count=0;
+				int head= g.head[p];
+				for(Direction d:Direction.ALL) {
+					if(g.grid[head+d.step]!=0) continue;
+					++count;
+					future.add(Move.get(m.player, m.dir).append(p,d));
+				}
+				if(count==0) {
+					// Kill Player
+					future.add(Move.get(m.player, m.dir).append(p,Direction.NONE));
+				}
+				m.unmove(g);
+			}
+		}
+		
+		present.clear();
+		return future;
+	}
+ 	final static long evaluate_maxn(final Grid g, final int player, final List<Integer> opponents, final Watchdog dog) throws Timeout {
+ 		++maxn_evals;
+		g.resetTerritory();
+		for(int p:opponents) {
+			g.calculateTerritory(p);
+		}
+		g.calculateTerritory(player);
+//		Utils.dumpTerritory(g);
+		
+		// Build articulations for all player in our component
+		g.resetArticulations();
+		for(int p:opponents) {
+			g.hideHead(p);
+			g.calculateArticulations(g.head[p], g.territory);
+			g.restoreHead(p);
+		}
+		g.hideHead(player);
+		g.calculateArticulations(g.head[player], g.territory);
+		g.restoreHead(player);
+//		Utils.dumpArticulations(g);
+		
+		// Compute remaining space
+		long res=0;
+		Space ccount;
+		long nodecount;
+		for(int p:opponents) {
+			ccount= max_articulated_space(g, g.head[p], g.territory);
+			dog.check();
+			nodecount= ccount.fillable(Cell.at(g.head[p])); //K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[p])))+K2*ccount1.edges; //
+			res= (res<<16) | nodecount;
+//			res= (nodecount<<48) | (res>>16) ;
+		}		
+		ccount= max_articulated_space(g, g.head[player], g.territory);
+		dog.check();
+		nodecount= ccount.fillable(Cell.at(g.head[player])); //K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//
+		res= (res<<16) | nodecount;
+//		res= (nodecount<<48) | (res>>16);
+		return res;
+	}
+
+	
+	
+	
+	final static public Move nextMoveTerritory(Move present, final Grid grid, final int forPlayer, final List<Integer> opponents, final int maxDepth, final Watchdog dog) {
+		// original grid must have been copied before calling this method as it will be messed up during processing
+
+		boolean dirty=present.strategy!=Strategy.TERRITORY;
 		dirty|= (present.opponents!=null && !opponents.equals(present.opponents));
 		
 		if(dirty) {
@@ -242,14 +394,15 @@ final class IA {
 			present.opponents=opponents;
 		}
 		
+		int opponent= opponents.get(0);
 		int itr;
 		Move best= null;
-		evaluations= 0;
+		ab_evals= 0;
 		ab_runs= 0;
 		ab_cutoffs= 0;
 		try {
 			for (itr= 1; itr<=maxDepth; itr++) {
-				Move m= _alphabeta(grid, forPlayer, opponents, Move.MIN, Move.MAX, (2*itr)-1, present, dog, "");
+				Move m= alphabeta(grid, forPlayer, opponents, Move.MIN, Move.MAX, (2*itr)-1, present, dog);
 				maxitr= 2*itr-1;
 //                if(best!=null) best.dispose(false);
 //                best= Move.get(m);
@@ -277,7 +430,8 @@ final class IA {
 	// do an iterative-deepening search on all moves and see if we can find a
 	// move
 	// sequence that cuts off our opponent
-	final static Move _alphabeta(Grid g, int forPlayer, LinkedList<Integer> opponents, int a, int b, int itr, final Move present, final Watchdog dog, final String tab) throws Timeout {
+	final static Move alphabeta(final Grid g, final int forPlayer, final List<Integer> opponents, long a, long b, int itr, final Move present, final Watchdog dog) throws Timeout {
+		final int opponent=opponents.get(0);
 		dog.check();
 		++ab_runs;
 		// last iteration?
@@ -285,7 +439,7 @@ final class IA {
 			// We're evaluating present if not already done !!
 			if (present.eval==Move.NaN) {
 				present.degree= g.degree(g.head[forPlayer]);
-				present.eval= evaluate_board(g, forPlayer, opponents, dog);
+				present.eval= evaluate_alphabeta(g, forPlayer, opponent, dog);
 			}
 			present.value= present.eval;
 			present.strategy= Strategy.TERRITORY;
@@ -314,7 +468,11 @@ final class IA {
 					return null;
 				}
 			} else {
-				present.future=buildFuture(opponents, g);
+				int xy=g.head[opponent];
+				for (Direction d : Direction.ALL) {
+					if(g.grid[xy+d.step]!=0) continue;
+					present.future.add(Move.get(opponent, d));
+				}
 				if(present.future.isEmpty()) {
 					// NO FUTURE FOR ONE OPPONENT !!!
 					present.eval=Move.MAX;
@@ -328,21 +486,21 @@ final class IA {
 		}
 		
 		// Sort Future
-		Collections.sort(present.future, maximize?Move.BEST_TERRITORY_FIRST:Move.BEST_TERRITORY_LAST);
+		Collections.sort(present.future, maximize?BEST_TERRITORY_FIRST:BEST_TERRITORY_LAST);
 
 		Move minimax=null;
-		int  minimaxv= maximize?Move.MIN:Move.MAX;
+		long  minimaxv= maximize?Move.MIN:Move.MAX;
 		
 		for (Move m : present.future) {
 			// move player
 			m.move(g);
-			_alphabeta(g, forPlayer, opponents, a, b, itr-1, m, dog, tab+"  ");
+			alphabeta(g, forPlayer, opponents, a, b, itr-1, m, dog);
 			m.unmove(g);
 			dog.check();
 			if(maximize) {
 				// Maximizing 
 				
-				if(minimax==null || Move.BEST_TERRITORY_FIRST.compare(minimax, m)>0) {
+				if(minimax==null || BEST_TERRITORY_FIRST.compare(minimax, m)>0) {
 					minimax= m;
 					minimaxv=minimax.value;
 				}
@@ -354,7 +512,7 @@ final class IA {
 				a= a>minimaxv?a:minimaxv;
 			} else {
 				// Minimizing
-				if(minimax==null || Move.BEST_TERRITORY_LAST.compare(minimax, m)>0) {
+				if(minimax==null || BEST_TERRITORY_LAST.compare(minimax, m)>0) {
 					minimax=m;
 					minimaxv= m.value;
 				}
@@ -374,130 +532,63 @@ final class IA {
 		present.opponents=opponents;
 		return minimax;
 	}
+	
+	final static Grid spacefill_tmp= new Grid();
+	final static public int evaluate_alphabeta(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
 
-	
-	final static private MoveList buildFuture(LinkedList<Integer> opponents, Grid g) {
-		
-		MoveList present= new MoveList();
-		MoveList future= new MoveList();
-		MoveList tmp;
-		
-		future.add(Move.get());
-		for(int p:opponents) {
-			tmp=present;
-			present=future;
-			future=tmp;
-			future.clear();
-			
-			int count=0;
-			for(Move m: present) {
-				m.move(g);
-				int head= g.head[p];
-				for(Direction d:Direction.ALL) {
-					if(g.grid[head+d.step]!=0) continue;
-					++count;
-					future.add(Move.get(m.player, m.dir).append(p,d));
-				}
-				m.unmove(g);
-			}
-			if(count==0) {
-				// Opponent p will die anyway
-				future.clear();
-				break;
-			}
-		}
-		
-		present.clear();
-		return future;
-	}
-	
-	
-	final static public int evaluate_board(final Grid g, final int player, final LinkedList<Integer> opponents, final Watchdog dog) throws Timeout {
-
-		++evaluations;
-		g.hideHead(player);
+		++ab_evals;
+		g.hideHeads();
 		g.calculateComponents(true); // compute present's components
-		g.restoreHead(player);
+		g.restoreHeads();
 		
 		int comp= g.playerComponent(player);
-		LinkedList<Integer> remaining_opponents= new LinkedList<Integer>();
-		for(int p:opponents) {
-			int head= g.head[p];
-			for(Direction d: Direction.ALL) {
-				if(g.grid[head+d.step]!=0) continue;
-				if(g.components[head+d.step]==comp) {
-					remaining_opponents.add(p);
-					break;
-				}
-			}
+		if(comp==g.playerComponent(opponent)) {
+			return evaluate_territory(g, player, opponent, dog);
 		}
-		if(remaining_opponents.size()>0) {
-			int v= evaluate_territory(g, player, remaining_opponents, dog);
-			return v;
-		}
-
+		// 2 players are in separated space
 		// Build articulated space for all players
 		int v;
-		int ff0;
-		int ffmax;
-		int maxp;
+		int ff0,ff1;
 			
 		g.resetArticulations();
-		for(int p:opponents) {
-			g.hideHead(p);
-			g.calculateArticulations(g.head[p]);
-			g.restoreHead(p);
-		} 
-		g.hideHead(player);
+		g.hideHeads();
+		g.calculateArticulations(g.head[opponent]);
 		g.calculateArticulations(g.head[player]);
-		g.restoreHead(player);
-	
+		g.restoreHeads();
+
 		Space ccount0= max_articulated_space(g, g.head[player]);
 		ff0= ccount0.fillable(Cell.at(g.head[player]));
-		ffmax= Move.MIN;
-		maxp= player;
-		for(int p:opponents) {
-			Space ccountp= max_articulated_space(g, g.head[p]);
-			int ffp= ccountp.fillable(Cell.at(g.head[p]));
-			if (ffp>ffmax) {
-				ffmax= ffp;
-				maxp= p;
-			}
+		Space ccountp= max_articulated_space(g, g.head[opponent]);
+		ff1= ccountp.fillable(Cell.at(g.head[opponent]));
+		dog.check();
+		v= 10000*(ff0-ff1);
+		// if our estimate is really close, try some searching
+		if (v!=0&&Math.abs(v)<=30000) {
+			Move present= Move.get();
+			spacefill_tmp.copy(g, false);
+			spacefill(present, spacefill_tmp, player, 3, dog);
+			ff0= (int)present.value;
 			dog.check();
+			present.reset();
+			spacefill_tmp.copy(g,false);
+			spacefill(present, spacefill_tmp, opponent, 3, dog);
+			ff1= (int)present.value;
+			v= 10000*(ff0-ff1);
+			present.dispose(false);
 		}
-		v= (int)(10000.0*ff0)/(ff0+ffmax);
-//		// if our estimate is really close, try some searching
-//		if (v!=0&&Math.abs(v)<=30000) {
-//			Move present= Move.get();
-//			spacefill_tmp.copy(g, false);
-//			spacefill(present, spacefill_tmp, player, 3, dog);
-//			ff0= present.value;
-//			dog.check();
-//			present.reset();
-//			spacefill_tmp.copy(g,false);
-//			spacefill(present, spacefill_tmp, maxp, 3, dog);
-//			ffmax= present.value;
-//			v= 10000*(ff0-ffmax);
-//			present.dispose(false);
-//		}
 		return v;
 	}
 	
-    final static Grid spacefill_tmp= new Grid();
-	final static int evaluate_territory(final Grid g, final int player, final LinkedList<Integer> opponents, final Watchdog dog) throws Timeout {
+ 	final static int evaluate_territory(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
 		g.resetTerritory();
-		for(int p:opponents) {
-			g.calculateTerritory(p);
-		}
+		g.calculateTerritory(opponent);
 		g.calculateTerritory(player);
 //		Utils.dumpTerritory(g);
 		
 		// Build articulations for all player in our component
 		g.resetArticulations();
 		g.hideHeads();
-		for(int p:opponents) {
-			g.calculateArticulations(g.head[p]/*, g.territory*/);
-		}
+		g.calculateArticulations(g.head[opponent]/*, g.territory*/);
 		g.calculateArticulations(g.head[player]/*, g.territory*/);
 		g.restoreHeads();
 //		Utils.dumpArticulations(g);
@@ -505,27 +596,11 @@ final class IA {
 		// Compute remaining space
 		Space ccount0= max_articulated_space(g, g.head[player], g.territory);
 		dog.check();
-		int nodecount= ccount0.fillable(Cell.at(g.head[player])); //K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//
-		int min=Integer.MAX_VALUE;
-		int max=Integer.MIN_VALUE;
-//		int maxp=-1;
-		int res=nodecount;
-		for(int p: opponents) {
-			Space ccount1= max_articulated_space(g, g.head[p], g.territory);
-			dog.check();
-			int nc1= ccount1.fillable(Cell.at(g.head[p])); //K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[p])))+K2*ccount1.edges; //
-			res+=nc1;
-//			if(min>nc1) {
-//				min=nc1;
-//			}
-			if(max<nc1) {
-				max=nc1;
-			}
-		}
-//		System.out.println("P"+player+"="+nodecount+"  P"+maxp+"="+max+" ==> "+(nodecount-max));
-//		return (int) (10000.0*nodecount)/res;
-//		return nodecount-max+min;
-		return (int)(10000.0*nodecount/(nodecount+max));
+		int nodecount0= ccount0.fillable(Cell.at(g.head[player])); //K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//
+		Space ccount1= max_articulated_space(g, g.head[opponent], g.territory);
+		dog.check();
+		int nodecount1= ccount1.fillable(Cell.at(g.head[opponent])); //K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[p])))+K2*ccount1.edges; //
+		return nodecount0-nodecount1;
 	}
 
 	// this assumes the space is separated into a DAG of chambers
@@ -776,7 +851,7 @@ final class IA {
 			Move m= spacefill(present, grid, player, itr, dog);
 			maxitr= itr;
 			if(m==null) continue;
-			if (best==null || Move.BEST_SURVIVAL_FIRST.compare(m,best)<0) {
+			if (best==null || BEST_SURVIVAL_FIRST.compare(m,best)<0) {
 //				if(Player.DEBUG_SURVIVAL>0) {
 					if(best!=null) best.dispose(false);
 					best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
@@ -833,7 +908,7 @@ final class IA {
 			}
 		}
 
-		Collections.sort(present.future, Move.BEST_SURVIVAL_FIRST);
+		Collections.sort(present.future, BEST_SURVIVAL_FIRST);
 		
 		int spacesleft= g.fillableAreaAt(head);
 		Move bestf= null;
@@ -841,7 +916,7 @@ final class IA {
 			f.move(g);
 			spacefill(f, g, player, itr-1, dog);
 			f.unmove(g);
-			if (bestf==null || Move.BEST_SURVIVAL_FIRST.compare(f, bestf)<0) {
+			if (bestf==null || BEST_SURVIVAL_FIRST.compare(f, bestf)<0) {
 				bestf= f;
 			}
 			if (bestf.value==spacesleft) break; // we solved it!
@@ -876,6 +951,148 @@ final class IA {
 		g.grid[b]= 0; g.addToComponents(b);
 		return a;
 	}	
+	
+	
+	static final public Comparator<Move> BEST_SURVIVAL_FIRST= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+//			// Compare depth first
+//			if(o1.depth<o2.depth) return -1; // put less deep eval'd first
+//			if(o1.depth>o2.depth) return 1; // put less deep eval'd first
+			
+			// Compare values
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return -1;
+				if(o1.value<o2.value) return 1;
+			}
+			// --> Compare degree
+			if(o1.degree==-1 && o2.degree==-1) return 0;
+			if(o1.degree==-1) return 1;
+			if(o2.degree==-1) return -1;
+			if(o1.degree<o2.degree) return -1;  
+			if(o1.degree>o2.degree) return 1;  
+			return 0;
+		}
+	};
+	
+	static final public Comparator<Move> BEST_SURVIVAL_LAST= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+//			// Compare depth first
+//			if(o1.depth<o2.depth) return 1;  // put less deep eval'd first
+//			if(o1.depth>o2.depth) return -1; // put less deep eval'd first
+
+			// Compare values
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put null last
+				if(o2.value==Move.NaN) return -1; // put null last
+			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return 1;
+				if(o1.value<o2.value) return -1;
+			}
+			// o1.value and o2.value are null
+			// --> compare degree
+			if(o1.degree==-1 && o2.degree==-1) return 0;
+			if(o1.degree==-1) return 1;
+			if(o2.degree==-1) return -1;
+			if(o1.degree<o2.degree) return  1;  
+			if(o1.degree>o2.degree) return -1;  
+			return 0;
+		}
+	};
+	static final public Comparator<Move> BEST_TERRITORY_FIRST= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+			// Compare values
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return -1;
+				if(o1.value<o2.value) return 1;
+			}
+//			// --> Compare degree
+//			if(o1.degree==-1 && o2.degree==-1) return 0;
+//			if(o1.degree==-1) return 1;
+//			if(o2.degree==-1) return -1;
+//			if(o1.degree<o2.degree) return -1;  
+//			if(o1.degree>o2.degree) return 1;  
+			return 0;
+		}
+	};
+	
+	static final public Comparator<Move> BEST_TERRITORY_LAST= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+			// Compare values
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put null last
+				if(o2.value==Move.NaN) return -1; // put null last
+			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return 1;
+				if(o1.value<o2.value) return -1;
+			}
+			// o1.value and o2.value are null
+//			// --> compare degree
+//			if(o1.degree==-1 && o2.degree==-1) return 0;
+//			if(o1.degree==-1) return 1;
+//			if(o2.degree==-1) return -1;
+//			if(o1.degree<o2.degree) return  1;  
+//			if(o1.degree>o2.degree) return -1;  
+			return 0;
+		}
+	};
+	static final public Comparator<Move> BEST_FIGHT_FIRST= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+			// Compare values
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}
+			if(o1.value==Move.NaN && o2.value==Move.NaN) return 0;
+			if(o1.value>o2.value) return -1;
+			if(o1.value<o2.value) return 1;
+
+			long m1p1= (o1.value)&0xFFFF;
+			long m1p2= (o1.value>>16)&0xFFFF;
+			long m1p3= (o1.value>>32)&0xFFFF;
+			long m1p4= (o1.value>>48)&0xFFFF;
+			long m2p1= (o2.value)&0xFFFF;
+			long m2p2= (o2.value>>16)&0xFFFF;
+			long m2p3= (o2.value>>32)&0xFFFF;
+			long m2p4= (o2.value>>48)&0xFFFF;
+			
+			int max=0;
+			max+= m1p1>m2p1?1:0;
+			max+= m1p2>m2p2?1:0;
+			max+= m1p3>m2p3?1:0;
+			max+= m1p4>m2p4?1:0;
+			
+			
+			
+			if(max>2) return -1;
+			if(max<2) return 1;
+			return 0;
+			
+			
+			
+//			// --> Compare degree
+//			if(o1.degree==-1 && o2.degree==-1) return 0;
+//			if(o1.degree==-1) return 1;
+//			if(o2.degree==-1) return -1;
+//			if(o1.degree<o2.degree) return -1;  
+//			if(o1.degree>o2.degree) return 1;  
+		}
+	};
+	
 }
 
 final class Grid {
@@ -1104,7 +1321,7 @@ final class Grid {
 	}
 
 	static public final int getX(final int xy) {
-		return xy%WIDTH;
+		return xy&0x1F;
 	}
 	
 	static public final String toXYString(int xy) {
@@ -1112,11 +1329,11 @@ final class Grid {
 	}
 	
 	static public final int getXY(int x, int y) {
-		return y*WIDTH+x;
+		return (y<<5)|x;
 	}
 
 	static public final int getY(final int xy) {
-		return xy/WIDTH;
+		return xy>>5;
 	}
 
 	final public int degree(final int idx) {
@@ -1388,7 +1605,7 @@ enum Cell {
 	}
 	
 	static final public Cell at(final int idx) {
-		return at(Grid.getX(idx), Grid.getY(idx));
+		return ((idx ^ (idx>>5)) & 1)==1?RED:BLACK;
 	}
 	
 	static final public Cell at(final int x, final int y) {
@@ -1424,24 +1641,24 @@ enum Direction {
 	}
 }
 enum Strategy {
-	NONE, TERRITORY,SURVIVAL,TERRITORY_SURVIVAL;
+	NONE,FIGHT,TERRITORY,SURVIVAL,ADAPTATIVE;
 }
 final class Move {
-	static public final int NaN=Integer.MAX_VALUE;
-	static public final int MAX=NaN-1;
-	static public final int MIN=-MAX;
+	static public final long NaN=Long.MAX_VALUE;
+	static public final long MAX=NaN-1;
+	static public final long MIN=-MAX;
 	
 	public int 		   player=-1;
 	public Direction[] dir= new Direction[] { Direction.ANY,Direction.ANY,Direction.ANY,Direction.ANY};
-	public int eval= NaN;
-	public int value= NaN;
-	public int degree= NaN;
+	public long eval= NaN;
+	public long value= NaN;
+	public int degree= -1;
 	public int depth= 1;
 	public Strategy strategy=Strategy.NONE;
 	
 
 	public MoveList future= new MoveList();
-	public LinkedList<Integer> opponents;
+	public List<Integer> opponents;
 	
 	private Move() {
 		++created;
@@ -1515,7 +1732,7 @@ final class Move {
 		for(int p=0; p<4; ++p) dir[p]= Direction.ANY;
 		eval=NaN;
 		value= NaN;
-		degree=NaN;
+		degree=-1;
 		depth=1;
 		strategy=Strategy.NONE;
 		if(immediate) future.clear();
@@ -1540,102 +1757,6 @@ final class Move {
 	}
 	
 	
-	static final public Comparator<Move> BEST_SURVIVAL_FIRST= new Comparator<Move>()  {
-		@Override
-		final public int compare(Move o1, Move o2) {
-//			// Compare depth first
-//			if(o1.depth<o2.depth) return -1; // put less deep eval'd first
-//			if(o1.depth>o2.depth) return 1; // put less deep eval'd first
-			
-			// Compare values
-			if(o1.value!=NaN || o2.value!=NaN) {
-				if(o1.value==NaN) return 1; // put not eval'd last
-				if(o2.value==NaN) return -1; // put not eval'd last
-			}
-			if(o1.value!=NaN && o2.value!=NaN) {
-				if(o1.value>o2.value) return -1;
-				if(o1.value<o2.value) return 1;
-			}
-			// --> Compare degree
-			if(o1.degree==NaN && o2.degree==NaN) return 0;
-			if(o1.degree==NaN) return 1;
-			if(o2.degree==NaN) return -1;
-			if(o1.degree<o2.degree) return -1;  
-			if(o1.degree>o2.degree) return 1;  
-			return 0;
-		}
-	};
-	
-	static final public Comparator<Move> BEST_SURVIVAL_LAST= new Comparator<Move>()  {
-		@Override
-		final public int compare(Move o1, Move o2) {
-//			// Compare depth first
-//			if(o1.depth<o2.depth) return 1;  // put less deep eval'd first
-//			if(o1.depth>o2.depth) return -1; // put less deep eval'd first
-
-			// Compare values
-			if(o1.value!=NaN || o2.value!=NaN) {
-				if(o1.value==NaN) return 1; // put null last
-				if(o2.value==NaN) return -1; // put null last
-			}
-			if(o1.value!=NaN && o2.value!=NaN) {
-				if(o1.value>o2.value) return 1;
-				if(o1.value<o2.value) return -1;
-			}
-			// o1.value and o2.value are null
-			// --> compare degree
-			if(o1.degree==NaN && o2.degree==NaN) return 0;
-			if(o1.degree==NaN) return 1;
-			if(o2.degree==NaN) return -1;
-			if(o1.degree<o2.degree) return  1;  
-			if(o1.degree>o2.degree) return -1;  
-			return 0;
-		}
-	};
-	static final public Comparator<Move> BEST_TERRITORY_FIRST= new Comparator<Move>()  {
-		@Override
-		final public int compare(Move o1, Move o2) {
-			// Compare values
-			if(o1.value!=NaN || o2.value!=NaN) {
-				if(o1.value==NaN) return 1; // put not eval'd last
-				if(o2.value==NaN) return -1; // put not eval'd last
-			}
-			if(o1.value!=NaN && o2.value!=NaN) {
-				if(o1.value>o2.value) return -1;
-				if(o1.value<o2.value) return 1;
-			}
-//			// --> Compare degree
-//			if(o1.degree==NaN && o2.degree==NaN) return 0;
-//			if(o1.degree==NaN) return 1;
-//			if(o2.degree==NaN) return -1;
-//			if(o1.degree<o2.degree) return -1;  
-//			if(o1.degree>o2.degree) return 1;  
-			return 0;
-		}
-	};
-	
-	static final public Comparator<Move> BEST_TERRITORY_LAST= new Comparator<Move>()  {
-		@Override
-		final public int compare(Move o1, Move o2) {
-			// Compare values
-			if(o1.value!=NaN || o2.value!=NaN) {
-				if(o1.value==NaN) return 1; // put null last
-				if(o2.value==NaN) return -1; // put null last
-			}
-			if(o1.value!=NaN && o2.value!=NaN) {
-				if(o1.value>o2.value) return 1;
-				if(o1.value<o2.value) return -1;
-			}
-			// o1.value and o2.value are null
-//			// --> compare degree
-//			if(o1.degree==NaN && o2.degree==NaN) return 0;
-//			if(o1.degree==NaN) return 1;
-//			if(o2.degree==NaN) return -1;
-//			if(o1.degree<o2.degree) return  1;  
-//			if(o1.degree>o2.degree) return -1;  
-			return 0;
-		}
-	};
 
 	
 	// Moves pool !!!
@@ -1756,7 +1877,10 @@ final class Space {
 		return this;
 	}
 	final Space add(int xy) {
-		if(Cell.at(xy)==Cell.RED) ++red; else ++black;
+		if(Cell.at(xy)==Cell.RED) 
+			++red; 
+		else 
+			++black;
 		return this;
 	}
 	final Space add(Cell startcell, int length) {

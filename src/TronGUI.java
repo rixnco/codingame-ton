@@ -112,19 +112,43 @@ public class TronGUI {
 		@UIReadOnly
 		@UIOrder(3)
 		public String getEval() {
-			return ""+(move==null?"":move.eval==Move.NaN?"":move.eval);
+			if(move==null || move.eval==Move.NaN) return "";
+			switch(move.strategy) {
+			case FIGHT:
+				StringBuffer res= new StringBuffer();
+				long eval= move.eval;
+				for(int p=0; p<4; ++p) {
+					res.insert(0, " ");
+					res.insert(0, Long.toString(eval&0xFFFF));
+					eval=eval>>16;
+				}
+				return res.toString();
+			default: return Long.toString(move.eval);
+			}
 		}
 		@UITitle("Value")
 		@UIReadOnly
 		@UIOrder(4)
 		public String getValue() {
-			return ""+(move==null?"":move.value==Move.NaN?"":move.value);
+			if(move==null || move.value==Move.NaN) return "";
+			switch(move.strategy) {
+			case FIGHT:
+				StringBuffer res= new StringBuffer();
+				long eval= move.value;
+				for(int p=0; p<4; ++p) {
+					res.insert(0, " ");
+					res.insert(0, Long.toString(eval&0xFFFF));
+					eval=eval>>16;
+				}
+				return res.toString();
+			default: return Long.toString(move.value);
+			}
 		}
 		@UITitle("Degree")
 		@UIReadOnly
 		@UIOrder(5)
 		public String getDegree() {
-			return ""+(move==null?"":move.degree==Move.NaN?"":move.degree);
+			return ""+(move==null?"":move.degree==-1?"":move.degree);
 		}
 		@UITitle("Opponents")
 		@UIReadOnly
@@ -295,7 +319,7 @@ public class TronGUI {
 		
 		strategyCombo = new JComboBox<>();
 		strategyCombo.setEnabled(false);
-		strategyCombo.addItem(Strategy.TERRITORY_SURVIVAL);
+		strategyCombo.addItem(Strategy.ADAPTATIVE);
 		strategyCombo.addItem(Strategy.TERRITORY);
 		strategyCombo.addItem(Strategy.SURVIVAL);
 		strategyCombo.setSelectedIndex(0);
@@ -379,11 +403,12 @@ public class TronGUI {
 				if(s!=null) {
 					switch(s) {
 					case NONE:
-					case TERRITORY_SURVIVAL:
+					case ADAPTATIVE:
 						heuristicButton.setEnabled(false);
 						heuristicButton.setText(s.toString());
 						heuristicField.setText("");
 						break;
+					case FIGHT:
 					case TERRITORY:
 					case SURVIVAL:
 						heuristicButton.setEnabled(true);
@@ -423,11 +448,19 @@ public class TronGUI {
 		heuristicButton.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
 				if(selectedMove==null) return;
-				if("TERRITORY".equals(e.getActionCommand())) {
+				if("FIGHT".equals(e.getActionCommand())) {
 					Grid g= selectedMove.grid;
 					Move m= Move.get(selectedMove.move);
 					try {
-						int value= IA.evaluate_board(g, g.player, m.opponents, Watchdog.getInfinite());
+						long value= IA.evaluate_maxn(g, g.player, m.opponents, Watchdog.getInfinite());
+						heuristicField.setText(""+value);
+					} catch (Timeout e1) {
+					}
+				} else if("TERRITORY".equals(e.getActionCommand())) {
+					Grid g= selectedMove.grid;
+					Move m= Move.get(selectedMove.move);
+					try {
+						int value= IA.evaluate_alphabeta(g, g.player, m.opponents.get(0), Watchdog.getInfinite());
 						heuristicField.setText(""+value);
 					} catch (Timeout e1) {
 					}
@@ -592,12 +625,19 @@ public class TronGUI {
 		DefaultMutableTreeNode node = new DefaultMutableTreeNode(new ExtendedMove(m,g));
 		if (m.future != null) {
 			Comparator<Move> c;
-			if(m.strategy==Strategy.TERRITORY) {
-				c=(m.depth&1)==1?Move.BEST_SURVIVAL_FIRST:Move.BEST_SURVIVAL_LAST;
-			} else {
-				c= Move.BEST_SURVIVAL_FIRST;
+			switch(m.strategy) { 
+			case TERRITORY:
+				c=(m.depth&1)==1?IA.BEST_SURVIVAL_FIRST:IA.BEST_SURVIVAL_LAST;
+				break;
+			case FIGHT:
+				c= IA.BEST_SURVIVAL_FIRST;
+				break;
+			case SURVIVAL:
+				c= IA.BEST_SURVIVAL_FIRST;
+			default:
+				c=null;
 			}
-			Collections.sort(m.future,  c);
+			if(c!=null) Collections.sort(m.future,  c);
 			for (Move f : m.future) {
 				node.add(toNode(f,null));
 			}
@@ -796,7 +836,7 @@ public class TronGUI {
 				
 				Move lastMove= lastPlayerMove[p];
 				if(lastMove==null) lastMove= Move.get();
-				if(!lastMove.future.isEmpty() && lastMove.strategy== Strategy.TERRITORY) {
+				if(!lastMove.future.isEmpty() && lastMove.strategy!= Strategy.SURVIVAL) {
 	      			// Try to find if we've already evaluated this position
 	      			for(Iterator<Move> it= lastMove.future.iterator(); it.hasNext(); ) {
 	      				Move f= it.next();
