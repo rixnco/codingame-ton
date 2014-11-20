@@ -8,6 +8,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -21,6 +22,7 @@ import java.util.concurrent.ThreadFactory;
 
 import javax.swing.AbstractAction;
 import javax.swing.Action;
+import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
@@ -62,6 +64,14 @@ import org.formbuilder.mapping.beanmapper.SampleBeanMapper;
 import org.formbuilder.mapping.beanmapper.SampleContext;
 
 import javax.swing.JTextField;
+import javax.swing.BoxLayout;
+
+import java.awt.Component;
+
+import javax.swing.SwingConstants;
+import javax.swing.border.EmptyBorder;
+
+import java.awt.FlowLayout;
 
 
 @SuppressWarnings("serial")
@@ -70,6 +80,23 @@ public class TronGUI {
 //	public static final File DEFAULT_GAME=new File("./test2.tron");
 
 
+	static String format(long eval, Strategy strategy) {
+		if(strategy==null) return Long.toString(eval);
+		switch(strategy) {
+		case FIGHT:
+			StringBuffer res= new StringBuffer();
+			for(int p=0; p<4; ++p) {
+				res.insert(0, " ");
+				res.insert(0, Long.toString(eval&0xFFFF));
+				eval=eval>>16;
+			}
+			return res.toString();
+		default: 
+			return Long.toString(eval);
+		}
+	}
+	
+	
 	static private class ExtendedMove {
 		public Move move;
 		public Grid grid;
@@ -93,7 +120,21 @@ public class TronGUI {
 		}
 		
 		public String toString() {
-			return move==null?"--":move.toString();
+			if(move==null) return "--";
+			if(move.player==-1) return "--";
+			StringBuffer bf= new StringBuffer();
+			boolean first=true;
+			int p=move.player;
+			do {
+				if(move.dir[p%4].step!=0) {
+					bf.append(first?"P":" P").append(p%4).append("-").append(move.dir[p%4]);
+					first=false;
+				}
+			} while((++p%4)!=move.player);
+			if(first) bf.append("--");
+			else bf.append(" [ "+(move.eval==Move.NaN?"-":TronGUI.format(move.eval, move.strategy))+" / "+(move.value==Move.NaN?"-":TronGUI.format(move.value,move.strategy))+" ]");
+			return bf.toString();
+
 		}
 		
 		@UITitle("Strategy")
@@ -113,18 +154,7 @@ public class TronGUI {
 		@UIOrder(3)
 		public String getEval() {
 			if(move==null || move.eval==Move.NaN) return "";
-			switch(move.strategy) {
-			case FIGHT:
-				StringBuffer res= new StringBuffer();
-				long eval= move.eval;
-				for(int p=0; p<4; ++p) {
-					res.insert(0, " ");
-					res.insert(0, Long.toString(eval&0xFFFF));
-					eval=eval>>16;
-				}
-				return res.toString();
-			default: return Long.toString(move.eval);
-			}
+			return TronGUI.format(move.eval, move.strategy);
 		}
 		@UITitle("Value")
 		@UIReadOnly
@@ -187,7 +217,7 @@ public class TronGUI {
 	private int gameStateIdx=-1;
 	private boolean gameOver=true;
 	private ExtendedMove selectedMove=null;
-	
+	private Game game;
 
 	private boolean processing=false;
 	
@@ -210,6 +240,8 @@ public class TronGUI {
 	private JPanel heuristicPanel;
 	private JButton heuristicButton;
 	private JMenuItem mntmNew;
+	private JPanel playersPanel;
+	private JPanel gamePanel;
 	/**
 	 * Launch the application.
 	 */
@@ -252,7 +284,7 @@ public class TronGUI {
 		gameSplitPane.setOneTouchExpandable(true);
 		mainSplitPane.setLeftComponent(gameSplitPane);
 		
-		JPanel gamePanel = new JPanel();
+		gamePanel= new JPanel();
 		gameSplitPane.setRightComponent(gamePanel);
 		gamePanel.setLayout(new BorderLayout(0, 0));
 		
@@ -311,11 +343,11 @@ public class TronGUI {
 		gamePlayBtn.setAction(gamePlayAction);
 		controlPanel.add(gamePlayBtn);
 		
-		JPanel panel = new JPanel();
-		gamePanel.add(panel, BorderLayout.NORTH);
+		JPanel strategyPanel = new JPanel();
+		gamePanel.add(strategyPanel, BorderLayout.NORTH);
 		
 		JLabel lblStrategy = new JLabel("Strategy");
-		panel.add(lblStrategy);
+		strategyPanel.add(lblStrategy);
 		
 		strategyCombo = new JComboBox<>();
 		strategyCombo.setEnabled(false);
@@ -323,21 +355,30 @@ public class TronGUI {
 		strategyCombo.addItem(Strategy.TERRITORY);
 		strategyCombo.addItem(Strategy.SURVIVAL);
 		strategyCombo.setSelectedIndex(0);
-		panel.add(strategyCombo);
+		strategyPanel.add(strategyCombo);
 		
 		JLabel lblDepth = new JLabel("depth");
-		panel.add(lblDepth);
+		strategyPanel.add(lblDepth);
 		
 		depthSpinner = new JSpinner(new SpinnerNumberModel(1,1,1000,1));
 		depthSpinner.setEnabled(false);
-		panel.add(depthSpinner);
+		strategyPanel.add(depthSpinner);
 		
 		JLabel lblTimeout = new JLabel("timeout");
-		panel.add(lblTimeout);
+		strategyPanel.add(lblTimeout);
 		
 		timeoutSpinner = new JSpinner(new SpinnerNumberModel(0,0,10000,100));
 		timeoutSpinner.setEnabled(false);
-		panel.add(timeoutSpinner);
+		strategyPanel.add(timeoutSpinner);
+		
+		playersPanel = new JPanel();
+		gamePanel.add(playersPanel, BorderLayout.WEST);
+		playersPanel.setLayout(new BoxLayout(playersPanel, BoxLayout.Y_AXIS));
+		playersPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
+		playersPanel.add(Box.createVerticalGlue());
+		playersPanel.add(new PlayerInfoPanel());
+		playersPanel.add(Box.createVerticalGlue());
+		
 		
 		JSplitPane moveSplitPane = new JSplitPane();
 		moveSplitPane.setResizeWeight(0.7);
@@ -374,24 +415,24 @@ public class TronGUI {
 					selected.grid=g;
 				}
 
-				if(selected.grid.remainingPlayers>1 && selected.grid.player!=-1) {
+				if(selected.grid.remainingPlayers>0) {
 					Grid g= selected.grid;
 					g.resetTerritory();
-					int player= g.player;
-					for(int p=g.nextPlayer(player); p!=player; p=g.nextPlayer(p)) {
+					int nextPlayer= g.nextPlayer();
+					int p= nextPlayer;
+					do {
 						g.calculateTerritory(p);
-					}
-					g.calculateTerritory(player);	// player is the next player to play
+						p= g.nextPlayer(p);
+					} while(p!=nextPlayer);
 					
 					g.resetArticulations();
-					g.hideHead(player);
-					g.calculateArticulations(g.head[player]/*, g.territory*/);
-					g.restoreHead(player);
-					for(int p=g.nextPlayer(player); p!=player; p=g.nextPlayer(p)) {
+					p=nextPlayer;
+					do {
 						g.hideHead(p);
 						g.calculateArticulations(g.head[p]/*, g.territory*/);
 						g.restoreHead(p);
-					}
+						p= g.nextPlayer(p);
+					} while(p!=nextPlayer);
 				}
 				boardPanel.setGrid(selected.grid);
 				
@@ -404,8 +445,9 @@ public class TronGUI {
 					switch(s) {
 					case NONE:
 					case ADAPTATIVE:
-						heuristicButton.setEnabled(false);
-						heuristicButton.setText(s.toString());
+						heuristicButton.setEnabled(true);
+						heuristicButton.setActionCommand(Strategy.ADAPTATIVE.toString());
+						heuristicButton.setText(Strategy.ADAPTATIVE.toString());
 						heuristicField.setText("");
 						break;
 					case FIGHT:
@@ -418,7 +460,9 @@ public class TronGUI {
 						break;
 					}
 				} else {
-					heuristicButton.setEnabled(false);
+					heuristicButton.setEnabled(true);
+					heuristicButton.setActionCommand(Strategy.ADAPTATIVE.toString());
+					heuristicButton.setText(Strategy.ADAPTATIVE.toString());
 					heuristicField.setText("");
 				}
 				
@@ -441,7 +485,9 @@ public class TronGUI {
 		moveDetailPanel.add(form.asComponent(), BorderLayout.CENTER);
 
 		heuristicPanel = new JPanel();
+		heuristicPanel.setBorder(new EmptyBorder(3, 5, 3, 5));
 		moveDetailPanel.add(heuristicPanel, BorderLayout.SOUTH);
+		heuristicPanel.setLayout(new BoxLayout(heuristicPanel, BoxLayout.X_AXIS));
 		
 		heuristicButton = new JButton("NONE");
 		heuristicButton.setEnabled(false);
@@ -453,7 +499,7 @@ public class TronGUI {
 					Move m= Move.get(selectedMove.move);
 					try {
 						long value= IA.evaluate_maxn(g, g.player, m.opponents, Watchdog.getInfinite());
-						heuristicField.setText(""+value);
+						heuristicField.setText(format(value, Strategy.FIGHT));
 					} catch (Timeout e1) {
 					}
 				} else if("TERRITORY".equals(e.getActionCommand())) {
@@ -461,16 +507,21 @@ public class TronGUI {
 					Move m= Move.get(selectedMove.move);
 					try {
 						int value= IA.evaluate_alphabeta(g, g.player, m.opponents.get(0), Watchdog.getInfinite());
-						heuristicField.setText(""+value);
+						heuristicField.setText(format(value, Strategy.TERRITORY));
 					} catch (Timeout e1) {
 					}
 				} else 	if("SURVIVAL".equals(e.getActionCommand())) {
 					Grid g= selectedMove.grid;
 					try {
 						int value= IA.floodfill(g, g.head[g.player], Watchdog.getInfinite());
-						heuristicField.setText(""+value);
+						heuristicField.setText(format(value, Strategy.SURVIVAL));
 					} catch (Timeout e1) {
 					}
+				} else if("ADAPTATIVE".equals(e.getActionCommand())) {
+					Grid g= selectedMove.grid;
+					Move m= Move.get();
+					IA.nextMove(m, g, g.player, 0, Watchdog.getInfinite());
+					heuristicField.setText(format(m.eval, m.strategy));
 				}
 
 				
@@ -479,10 +530,13 @@ public class TronGUI {
 		});
 		heuristicPanel.add(heuristicButton);
 		
+		heuristicPanel.add(Box.createRigidArea(new Dimension(10, 0)));
+		
 		heuristicField = new JTextField();
+		heuristicField.setHorizontalAlignment(SwingConstants.TRAILING);
+		heuristicField.setAlignmentX(0.5f);
 		heuristicField.setEditable(false);
 		heuristicPanel.add(heuristicField);
-		heuristicField.setColumns(10);
 		
 		JScrollPane logScrollPane = new JScrollPane();
 		logScrollPane.setPreferredSize(new Dimension(10, 10));
@@ -532,14 +586,7 @@ public class TronGUI {
 		mntmNew = new JMenuItem("New");
 		mntmNew.addActionListener(new ActionListener() {
 			public void actionPerformed(ActionEvent e) {
-//				NewGameDialog diag= new NewGameDialog();
-//				diag.setTitle("New Game");
-//				diag.setDefaultCloseOperation(JDialog.HIDE_ON_CLOSE);
-//				diag.setModal(true);
-//				diag.pack();
-//				diag.setVisible(true);
-				
-				Grid g= NewGameDialog.showDialog(frame, "New Game");
+				Game g= NewGameDialog.showDialog(frame, "New Game");
 				if(g!=null) {
 					initGame(g);
 				}
@@ -589,11 +636,11 @@ public class TronGUI {
 	private void loadGame(File file) {
 		if(file==null) return;
 		try {
-			Grid g= Utils.loadGrid(file);
+			Game game= GameUtils.loadGame(file);
 			
-			initGame(g);
+			initGame(game);
 			
-		} catch (FileNotFoundException e) {
+		} catch (IOException e) {
 		}
 	}
 
@@ -605,20 +652,38 @@ public class TronGUI {
 			}
 			Grid g= selectedMove.grid;
 			
-			Utils.store(g,file);
+			GameUtils.store(new Game(g, game.playersInfo),file);
 			
-		} catch (FileNotFoundException e) {
+		} catch (IOException e) {
 		}
 	}
 
 	
-	private void initGame(Grid g) {
-		ExtendedMove m= new ExtendedMove(Move.get(),g);
+	private void initGame(Game game) {
+		this.game= game;
+		playersPanel.removeAll();
+		playersPanel.add(Box.createVerticalGlue());
+		for(int p=0; p<game.playersInfo.size(); ++p) {
+			PlayerInfo info= game.playersInfo.get(p);
+			playersPanel.add(new PlayerInfoPanel(BoardPanel.playerColor[p], info));
+		}
+		playersPanel.add(Box.createVerticalGlue());
+		
+		gamePanel.revalidate();
+		
+		
+		Grid g= game.grid.copy();
 		lastPlayerMove= new Move[g.nbPlayers];
 		gameStates.clear();
-		gameStates.add(m);
+		for(int i=0, nb=g.nbMoves-g.nbPlayers; i<nb; ++i) {
+			ExtendedMove m= new ExtendedMove(Move.get(),g.copy());
+			gameStates.addFirst(m);
+			g.unmove();
+		}
+		ExtendedMove m= new ExtendedMove(Move.get(),g.copy());
+		gameStates.addFirst(m);
 		gameStateIdx=-1;
-		setCurrentGameState(0);
+		gameMoveFirst();
 	}
 
 	private DefaultMutableTreeNode toNode(Move m, Grid g) {
@@ -627,10 +692,10 @@ public class TronGUI {
 			Comparator<Move> c;
 			switch(m.strategy) { 
 			case TERRITORY:
-				c=(m.depth&1)==1?IA.BEST_SURVIVAL_FIRST:IA.BEST_SURVIVAL_LAST;
+				c=(m.depth&1)==1?IA.BEST_TERRITORY_FIRST:IA.BEST_TERRITORY_LAST;
 				break;
 			case FIGHT:
-				c= IA.BEST_SURVIVAL_FIRST;
+				c= IA.BEST_FIGHT_FIRST;
 				break;
 			case SURVIVAL:
 				c= IA.BEST_SURVIVAL_FIRST;
@@ -742,8 +807,7 @@ public class TronGUI {
 	
 	private void gameReset() {
 		if(gameStates.size()<1) return;
-		ExtendedMove m= gameStates.getFirst();
-		initGame(m.grid);
+		initGame(game);
 	}
 	
 	private abstract class GameAction extends AbstractAction {
@@ -836,15 +900,23 @@ public class TronGUI {
 				
 				Move lastMove= lastPlayerMove[p];
 				if(lastMove==null) lastMove= Move.get();
-				if(!lastMove.future.isEmpty() && lastMove.strategy!= Strategy.SURVIVAL) {
+				if(!lastMove.future.isEmpty()) {
 	      			// Try to find if we've already evaluated this position
-	      			for(Iterator<Move> it= lastMove.future.iterator(); it.hasNext(); ) {
-	      				Move f= it.next();
-	      				if(!f.match(present)) continue;
-	      				it.remove();
-	      				lastMove=f;
-	      				break;
-	      			}
+					switch(lastMove.strategy) {
+					case TERRITORY:
+		      			for(Iterator<Move> it= lastMove.future.iterator(); it.hasNext(); ) {
+		      				Move f= it.next();
+		      				if(!f.match(present)) continue;
+		      				it.remove();
+		      				lastMove=f;
+		      				break;
+		      			}
+		      			break;
+					case FIGHT:
+						// TODO: Try to find matching future
+						lastMove.future.clear();
+						break;
+					}
 				}
 				
 				long start= System.currentTimeMillis();

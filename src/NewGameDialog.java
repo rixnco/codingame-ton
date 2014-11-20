@@ -7,7 +7,9 @@ import java.awt.event.ActionListener;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
+import java.util.ArrayList;
 import java.util.LinkedList;
+import java.util.List;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -26,9 +28,9 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 	 */
 	private static final long serialVersionUID= 1L;
 	static NewGameDialog dialog;
-	static Grid value=null;
+	static Game value=null;
 	
-	public static Grid showDialog(Frame frame, String title) {
+	public static Game showDialog(Frame frame, String title) {
 		dialog= new NewGameDialog(frame, title);
 		dialog.setLocationRelativeTo(frame);
 		dialog.setVisible(true);
@@ -37,7 +39,9 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 	
 	
 	
-	private Grid g= new Grid();
+	private Game game= new Game(new Grid(), new ArrayList<PlayerInfo>(4));
+	private Grid g= game.grid;
+	private List<PlayerInfo> players= game.playersInfo;
 	BoardPanel boardPanel;
 	private int xyo,player;
 
@@ -113,6 +117,8 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 		    			}
 		    			--g.nbPlayers;
 		    			--g.remainingPlayers;
+		    			
+		    			
 		    			boardPanel.setGrid(g);
 		    			
 		    			okButton.setEnabled(g.nbPlayers>1);
@@ -129,7 +135,10 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 
 	public void actionPerformed(ActionEvent e) {
 		if("OK".equals(e.getActionCommand())) {
-			NewGameDialog.value=g;
+			for(int p=0; p<g.nbPlayers; ++p) {
+				game.playersInfo.add(new PlayerInfo("P"+p));
+			}
+			NewGameDialog.value=game;
 		}
 		setVisible(false);
 	}

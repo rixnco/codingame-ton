@@ -6,6 +6,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.InputMismatchException;
@@ -16,36 +17,40 @@ import java.util.Scanner;
 
 public class Utils {
 
-	static public void store(Grid g, String file) throws FileNotFoundException {
-		store(g, new PrintStream(new FileOutputStream(file)));
-	}
-
-	static public void store(Grid g, File file) throws FileNotFoundException {
-		store(g, new PrintStream(new FileOutputStream(file)));
-	}
-
-	static public void store(Grid g, PrintStream out) {
-
-		out.println("GRID");
-		for (int y= 0; y<Grid.PLAYGROUND_HEIGHT; ++y) {
-			for (int x= 0; x<Grid.PLAYGROUND_WIDTH; ++x) {
-				int xy= Grid.getXY(x+1, y+1);
-				if (g.grid[xy]==0||getLightCycle(g, xy)>=0) out.print(".");
-				else out.print("X");
-
-			}
-			out.println();
-		}
-		out.println("PLAYERS "+g.nbPlayers);
-		out.println("CURRENT "+g.player);
-		out.println("MOVES "+g.moves.toString());
-		List<Iterator<Integer>> cyclesIt= new ArrayList<>(g.nbPlayers);
-		for (int p= 0; p<g.nbPlayers; ++p) {
-			if(g.alive[p]) out.println("P"+p+" "+g.cycles.get(p).toString());
-		}
-		out.flush();
-
-	}
+//	static public void store(Grid g, String file) throws FileNotFoundException {
+//		store(g, new PrintStream(new FileOutputStream(file)));
+//	}
+//
+//	static public void store(Grid g, File file) throws FileNotFoundException {
+//		store(g, new PrintStream(new FileOutputStream(file)));
+//	}
+//
+//	static public void store(Grid g, PrintStream out) {
+//		store(g,new PrintWriter(out));
+//	}
+//	static public void store(Grid g, PrintWriter out) {
+//
+//		out.println("GRID");
+//		for (int y= 0; y<Grid.PLAYGROUND_HEIGHT; ++y) {
+//			for (int x= 0; x<Grid.PLAYGROUND_WIDTH; ++x) {
+//				int xy= Grid.getXY(x+1, y+1);
+//				if (g.grid[xy]==0||getLightCycle(g, xy)>=0) out.print(".");
+//				else out.print("X");
+//
+//			}
+//			out.println();
+//		}
+//		out.println("PLAYERS "+g.nbPlayers);
+//		out.println("ALIVE "+Arrays.toString(g.alive));
+//		out.println("CURRENT "+g.player);
+//		out.println("MOVES "+g.moves.toString());
+////		List<Iterator<Integer>> cyclesIt= new ArrayList<>(g.nbPlayers);
+//		for (int p= 0; p<g.nbPlayers; ++p) {
+//			out.println("P"+p+" "+g.cycles.get(p).toString());
+//		}
+//		out.flush();
+//
+//	}
 
 	static public void dump(Grid g) {
 		dump(g, System.out);
@@ -70,6 +75,26 @@ public class Utils {
 		out.flush();
 	}
 
+	static public void dump(Grid g, PrintWriter out) {
+
+		out.println("GRID moves="+g.moves.size());
+		for (int y= 0; y<Grid.PLAYGROUND_HEIGHT; ++y) {
+			for (int x= 0; x<Grid.PLAYGROUND_WIDTH; ++x) {
+				int xy= Grid.getXY(x+1, y+1);
+				int p= getLightCycle(g, xy);
+				if (p>=0) {
+					if (xy==g.cycles.get(p).getLast()) out.print("o");
+					else out.print(p);
+				} else if (g.grid[xy]==0) out.print(".");
+				else out.print("X");
+
+			}
+			out.println();
+		}
+		out.flush();
+	}
+	
+	
 //	final public void dump(PrintStream out) {
 //
 //		out.println("GRID");
@@ -207,21 +232,25 @@ public class Utils {
 		return -1;
 	}
 
-	static public Grid loadGrid(String dump) throws FileNotFoundException {
+	static public Grid loadGrid(String dump) throws IOException {
 		return loadGrid(new Scanner(dump));
 	}
 
-	static public Grid loadGrid(File file) throws FileNotFoundException {
+	static public Grid loadGrid(File file) throws IOException {
 		return loadGrid(new Scanner(file));
 	}
 
-	static public Grid loadGrid(InputStream in) {
+	static public Grid loadGrid(InputStream in) throws IOException {
 		return loadGrid(new Scanner(in));
 	}
-	static public Grid loadGrid(Scanner in) {
+	static public Grid loadGrid(Scanner in) throws IOException {
 
 		try {
-			String line= in.next("GRID");
+			String line;
+			while(!in.hasNext("GRID")) {
+				in.nextLine();
+			}
+			
 			in.nextLine();
 			Grid g= new Grid();
 			for (int y= 0; y<Grid.PLAYGROUND_HEIGHT; ++y) {
@@ -233,33 +262,43 @@ public class Utils {
 					else g.grid[xy]= 1;
 				}
 			}
-
+			
 			line= in.next("PLAYERS");
-			int p= in.nextInt();
-			g.setNbPlayers(p);
+			int nbPlayers= in.nextInt();
+			int p;
+			g.setNbPlayers(nbPlayers);
 			in.nextLine();
 			
-			if(in.hasNext("CURRENT")) {
+			if(in.hasNext("ALIVE")) {
 				// New format
+				line=in.next("ALIVE");
+				in.useDelimiter(" \\[|, |]");
+				g.remainingPlayers=0;
+				for(p=0; p<nbPlayers; ++p) {
+					g.alive[p]= in.nextBoolean();
+					if(g.alive[p]) ++g.remainingPlayers;
+				}
+				in.reset();
+				in.nextLine();
 				line= in.next("CURRENT");
-				p= in.nextInt();
-				g.player=p;
+				g.player=in.nextInt();
 				in.nextLine();
 				in.next("MOVES");
 				in.useDelimiter(" \\[|, |]");
 				while(in.hasNextInt()) {
 					g.moves.add(in.nextInt());
 				}
+				g.nbMoves= g.moves.size();
 				in.reset();
 				in.nextLine();
-				for(p=0; p<g.nbPlayers; ++p) {
+				for(p=0; p<nbPlayers; ++p) {
 					LinkedList<Integer> cycle= g.cycles.get(p);
 					in.next("P"+p);
 					in.useDelimiter(" \\[|, |]");
 					while(in.hasNextInt()) {
 						final int xy=in.nextInt();
-						g.head[p]=xy;
-						g.grid[xy]=1;
+						g.head[p]=g.alive[p]?xy:0;
+						g.grid[xy]=g.alive[p]?(byte)1:(byte)0;
 						cycle.add(xy);
 					}
 					in.reset();
@@ -276,11 +315,11 @@ public class Utils {
 					g.move(p, xy);
 				}
 			}
+			
 			return g;
-		} catch (InputMismatchException e) {
-			e.printStackTrace();
-		}
-		return null;
+		} catch (Throwable e) {
+			throw new IOException("Invalid format", e);
+		} 
 	}
 
 	static public short[] loadComponents(InputStream in) {

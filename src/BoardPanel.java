@@ -45,9 +45,9 @@ public class BoardPanel extends JPanel {
 		return (y-oy)/cw;
 	}
 	
-	Color[] playerColor= new Color[] { new Color(0xFF0000), new Color(0x0000FF), new Color(0x00FF00), new Color(0xFF8000) };
+	static final Color[] playerColor= new Color[] { new Color(0xFF0000), new Color(0x0000FF), new Color(0x00FF00), new Color(0xFF8000) };
 
-	Color[] territoryColor= new Color[] { new Color(0xFF8080), new Color(0x8080FF), new Color(0x80FF80), new Color(0xFFC080) };
+	static final Color[] territoryColor= new Color[] { new Color(0xFF8080), new Color(0x8080FF), new Color(0x80FF80), new Color(0xFFC080) };
 	
 	private int cw;
 	private int ox;
