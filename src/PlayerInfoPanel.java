@@ -10,8 +10,6 @@ import javax.swing.JLabel;
 
 import java.awt.Insets;
 
-import net.miginfocom.swing.MigLayout;
-
 import java.awt.Font;
 
 

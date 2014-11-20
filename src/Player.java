@@ -1254,13 +1254,12 @@ final class Grid {
 	final public void calculateTerritory(int p) {
 		if(alive[p]) calculateTerritory(head[p], p);
 	}
+	static ArrayDeque<Integer> current= new ArrayDeque<Integer>(10);
+	static ArrayDeque<Integer> next= new ArrayDeque<Integer>(10);
+	static ArrayDeque<Integer> temp;
 	final public void calculateTerritory(int xy, int player) {
 		dirtyTerritory=false;
 
-		ArrayDeque<Integer> current= new ArrayDeque<Integer>(10);
-		ArrayDeque<Integer> next= new ArrayDeque<Integer>(10);
-		ArrayDeque<Integer> temp;
-		
 		short pID= (short) (1<<(12+player));
 		
 		next.add(xy);
