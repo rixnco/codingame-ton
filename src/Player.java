@@ -34,6 +34,7 @@ final class Player {
         boolean[] alive= new boolean[] { 0<N, 1<N, 2<N, 3<N };
         boolean firstRound=true;
         Move current;
+        int p;
         while (true) {
         	System.arraycopy(XY1, 0, XY0, 0, N);
         	current= Move.get(0);
@@ -43,7 +44,7 @@ final class Player {
                 final int X1 = in.nextInt()+1; // starting X coordinate of lightcycle (can be the same as X0 if you play before this player)
                 final int Y1 = in.nextInt()+1; // starting Y coordinate of lightcycle (can be the same as Y0 if you play before this player)
                 in.nextLine();
-                int p= (i-P+N)%N;
+                p= (i-P+N)%N;
                 if(firstRound) { // first round
                 	grid.move(p, Grid.getXY(X0,Y0));
                     XY0[p]= Grid.getXY(X0,Y0);
@@ -110,6 +111,17 @@ final class Player {
 		}
 	}
 }
+final class ListInt {
+	final int[] buffer; int first,last;
+	ListInt(int size) { buffer= new int[size]; first=last=0; }
+	void add(int v) { buffer[last++]=v;	}
+	int remove() { return buffer[first++]; }
+	int get(int idx) { return buffer[first+idx]; }
+	void set(int idx, int val) { buffer[first+idx]=val; }
+	int size() { return last-first; }
+	boolean isEmpty() { return first==last; }
+	void clear() { first=last=0; }
+}
 final class IA {
 	// Entry point
 	final static public Move nextMove(final Move present, final Grid grid, final int forPlayer, final int maxDepth, Watchdog dog) {
@@ -164,9 +176,9 @@ final class IA {
 			for (itr= 0; itr<maxDepth; itr++) {
 				Move m= maxn(present, forPlayer, opponents, grid, itr*opponents.size(), dog);
 				maxitr= (itr*opponents.size())+1;
-				if(best!=null) best.dispose(false);
-				best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
-//				best= m;  // Use best as is. It may be modified by next itr search, but sorting should take care of that
+//				if(best!=null) best.dispose(false);
+//				best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
+				best= m;  // Use best as is. It may be modified by next itr search, but sorting should take care of that
 				present.depth=maxitr;		
 				dog.check();
 			}
@@ -192,6 +204,7 @@ final class IA {
 			return null;
 		}
 		int player= players.get((nbPlayers-(itr%nbPlayers))%nbPlayers);
+		if(!g.alive[player]) return maxn(present,forPlayer, players, g, itr-1, dog);
 		if (present.future.isEmpty()) { // No future yet. build it
 			int xy=g.head[player];
 			for (Direction d : Direction.ALL) {
@@ -453,10 +466,10 @@ final class IA {
 		// Compute remaining space
 		Space ccount0= max_articulated_space(g, g.head[player], g.territory);
 		dog.check();
-		int nodecount0= ccount0.fillable(Cell.at(g.head[player])); //K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//
+		int nodecount0= K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//ccount0.fillable(Cell.at(g.head[player])); //
 		Space ccount1= max_articulated_space(g, g.head[opponent], g.territory);
 		dog.check();
-		int nodecount1= ccount1.fillable(Cell.at(g.head[opponent])); //K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[p])))+K2*ccount1.edges; //
+		int nodecount1= K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[opponent])))+K2*ccount1.edges; //ccount1.fillable(Cell.at(g.head[opponent])); //
 		return nodecount0-nodecount1;
 	}
 	final static Space max_articulated_space(Grid g, int v) {
@@ -540,9 +553,12 @@ final class IA {
 			}
 		}
 	}
-	static private ArrayDeque<Integer> current= new ArrayDeque<Integer>(40);
-	static private ArrayDeque<Integer> next= new ArrayDeque<Integer>(40);
-	static private ArrayDeque<Integer> tmp;
+//	static private ArrayDeque<Integer> current= new ArrayDeque<Integer>(40);
+//	static private ArrayDeque<Integer> next= new ArrayDeque<Integer>(40);
+//	static private ArrayDeque<Integer> tmp;
+	static private ListInt current= new ListInt(1024);
+	static private ListInt next= new ListInt(1024);
+	static private ListInt tmp;
 	final static Space exploreSpace(final Grid g, int xy, final List<Integer> exits, final short[] territory, final short pID) {
 		// Rework pID marking
 		Space s= new Space();
@@ -554,7 +570,7 @@ final class IA {
 			current=next;
 			next=tmp;
 			while(!current.isEmpty()) {
-				xy=current.poll();
+				xy=current.remove();
 				if((g.num[xy]&pID)==pID) continue;
 				s.add(xy);	       // Add cell
 				g.num[xy]|=pID;    // Mark processed;
@@ -592,48 +608,6 @@ final class IA {
 				}
 			}
 		} while(!next.isEmpty());
-		return s;
-	}
-	final static Space exploreSpace1(final Grid g, final int xy, final List<Integer> exits, final short[] territory, final short pID) {
-		Space s= new Space();
-		if ((g.num[xy]&pID)==pID) return s; // redundant; already explored
-		s.add(xy);
-		g.num[xy]|= pID; // mark with pID
-		if (g.articd[xy]!=0) {
-			// we're an articulation vertex; nothing to do but populate the
-			// exits
-			for (Direction d : Direction.ALL) {
-				int w= xy+d.step;
-				if (g.grid[w]!=0) continue;
-				++s.edges;
-				if ((g.num[w]&pID)==pID) continue; // use 'num' from articulation vertex pass to mark nodes used
-				if (territory!=null&&(territory[w]&pID)!=pID) {
-					++s.front;
-					g.num[w]|=pID;
-					continue;
-				}
-				exits.add(w);
-			}
-		} else {
-			// this is a non-articulation vertex
-			for (Direction d : Direction.ALL) {
-				int w= xy+d.step;
-				if (g.grid[w]!=0) continue;
-				++s.edges;
-				if ((g.num[w]&pID)==pID) continue; // use 'num' from articulation vertex pass to mark nodes used
-				// filter out nodes not in our territory region
-				if (territory!=null&&(territory[w]&pID)!=pID) {
-					++s.front;
-					g.num[w]|=pID;
-					continue;
-				}
-				if (g.articd[w]!=0) { // is this vertex articulated? then add it as an exit and don't traverse it yet
-					exits.add(w);
-				} else {
-					s.add(exploreSpace1(g, w, exits, territory, pID));
-				}
-			}
-		}
 		return s;
 	}
 	// Survival Strategy 
@@ -804,7 +778,7 @@ final class IA {
 			return 0;
 		}
 	};
-	static final public Comparator<Move> BEST_FIGHT_FIRST= new Comparator<Move>()  {
+	static final public Comparator<Move> BEST_FIGHT_MAX_ME= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
@@ -814,6 +788,7 @@ final class IA {
 			}			
 			long v1= (o1.value>>(16*o1.player))&0xFFFF;
 			long v2= (o2.value>>(16*o2.player))&0xFFFF;	
+			
 			if(v1>v2) return -1;
 			if(v1<v2) return 1;
 
@@ -841,6 +816,45 @@ final class IA {
 			return 0;
 		}
 	};
+	static final public Comparator<Move> BEST_FIGHT_MIN_OTHERS= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+			// Compare values
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}			
+			long v1= (o1.value>>(16*o1.player))&0xFFFF;
+			long v2= (o2.value>>(16*o2.player))&0xFFFF;	
+
+			long min1=Long.MAX_VALUE;
+			long min2=Long.MAX_VALUE;
+			long v;
+			for(int p=0; p<4; ++p) {
+				if(p==o1.player) continue;
+				v= (o1.value>>(16*p))&0xFFFF;
+				if(v>0 && v<min1) min1=v;
+				v= (o2.value>>(16*p))&0xFFFF;
+				if(v>0 && v<min2) min2=v;
+			}
+
+			if(min1<min2 && min1<v1) return -1;
+			if(min1>min2 && min2<v2) return 1;
+			
+			if(v1>v2) return -1;
+			if(v1<v2) return 1;
+
+			v1=v2=0;
+			for(int p=0; p<4; ++p) {
+				v1+= ((o1.value>>(16*p))&0xFFFF);
+				v2+= ((o2.value>>(16*p))&0xFFFF);
+			}
+			if(v1<v2) return -1;
+			if(v1>v2) return 1;
+			return 0;
+		}
+	};
+	static final public Comparator<Move> BEST_FIGHT_FIRST= BEST_FIGHT_MIN_OTHERS;
 }
 final class Grid {
 	static public final int PLAYGROUND_WIDTH= 30;
@@ -1089,18 +1103,18 @@ final class Grid {
 		if(force) dirtyComponents=true;
 		calculateComponents();
 	}
+	static ListInt equiv= new ListInt(1024);
 	final public void calculateComponents() {
 		if(!dirtyComponents) return;
 
-		List<Short> equiv= new ArrayList<>();
 		Arrays.fill(components, (short)0);
 		equiv.add((short)0);
 		short group=1;
 		int idx= FIRST;
 		for(idx= FIRST; idx<=LAST; ++idx) {
 			if(grid[idx]!=0) continue;
-			short up= equiv.get(components[idx+Direction.UP.step]);
-			short left= equiv.get(components[idx+Direction.LEFT.step]);
+			short up= (short)equiv.get(components[idx+Direction.UP.step]);
+			short left= (short)equiv.get(components[idx+Direction.LEFT.step]);
 			if(up==0 && left==0) {
 				// new component;
 				equiv.add(group);
@@ -1125,7 +1139,7 @@ final class Grid {
 		idx= FIRST;
 		for(int y=1; y<HEIGHT-1; ++y, idx+=2) {
 			for(int x=1; x<WIDTH-1; ++x, ++idx) {
-				short e= equiv.get(components[idx]);
+				short e= (short)equiv.get(components[idx]);
 				components[idx]=e;
 				cedges[e]+=degree(idx);
 				if(Cell.at(x,y)==Cell.RED) ++red[e]; else ++black[e];
@@ -1173,7 +1187,7 @@ final class Grid {
 		cedges[components[idx]] += 2 * degree(idx);
 		if (Cell.at(idx)==Cell.RED) ++red[components[idx]]; else ++black[components[idx]];
 	}	
-	final private void mergeEquiv(List<Short> equiv, short oldGroup, short newGroup) {
+	final private void mergeEquiv(ListInt equiv, short oldGroup, short newGroup) {
 		for(int t=0; t<equiv.size(); ++t) {
 			if(equiv.get(t)==oldGroup) equiv.set(t, newGroup);
 		}
@@ -1254,13 +1268,21 @@ final class Grid {
 	final public void calculateTerritory(int p) {
 		if(alive[p]) calculateTerritory(head[p], p);
 	}
-	static ArrayDeque<Integer> current= new ArrayDeque<Integer>(10);
-	static ArrayDeque<Integer> next= new ArrayDeque<Integer>(10);
-	static ArrayDeque<Integer> temp;
+//	static ArrayDeque<Integer> current= new ArrayDeque<Integer>(10);
+//	static ArrayDeque<Integer> next= new ArrayDeque<Integer>(10);
+//	static ArrayDeque<Integer> temp;
+	
+	static ListInt current= new ListInt(1024);
+	static ListInt next= new ListInt(1024);
+	static ListInt temp;
+	
+	
 	final public void calculateTerritory(int xy, int player) {
 		dirtyTerritory=false;
 
 		short pID= (short) (1<<(12+player));
+		next.clear();
+		current.clear();
 		
 		next.add(xy);
 		territory[xy]=pID;
@@ -1272,7 +1294,7 @@ final class Grid {
 			next=temp;
 			
 			while(!current.isEmpty()) {
-				xy= current.poll();
+				xy= current.remove();
 				for(Direction d: Direction.ALL) {
 					int xyn= xy+d.step;
 					if(grid[xyn]!=0) continue;

@@ -416,23 +416,25 @@ public class TronGUI {
 				}
 
 				if(selected.grid.remainingPlayers>0) {
-					Grid g= selected.grid;
-					g.resetTerritory();
-					int nextPlayer= g.nextPlayer();
-					int p= nextPlayer;
-					do {
-						g.calculateTerritory(p);
-						p= g.nextPlayer(p);
-					} while(p!=nextPlayer);
-					
-					g.resetArticulations();
-					p=nextPlayer;
-					do {
-						g.hideHead(p);
-						g.calculateArticulations(g.head[p]/*, g.territory*/);
-						g.restoreHead(p);
-						p= g.nextPlayer(p);
-					} while(p!=nextPlayer);
+					synchronized(executor) {
+						Grid g= selected.grid;
+						g.resetTerritory();
+						int nextPlayer= g.nextPlayer();
+						int p= nextPlayer;
+						do {
+							g.calculateTerritory(p);
+							p= g.nextPlayer(p);
+						} while(p!=nextPlayer);
+						
+						g.resetArticulations();
+						p=nextPlayer;
+						do {
+							g.hideHead(p);
+							g.calculateArticulations(g.head[p]/*, g.territory*/);
+							g.restoreHead(p);
+							p= g.nextPlayer(p);
+						} while(p!=nextPlayer);
+					}
 				}
 				boardPanel.setGrid(selected.grid);
 				
@@ -918,13 +920,14 @@ public class TronGUI {
 						break;
 					}
 				}
-				
-				long start= System.currentTimeMillis();
-				Watchdog dog= timeout==0?Watchdog.getInfinite():Watchdog.getDefault();
-				t.schedule(dog, timeout);
-				tmp= IA.nextMove(lastMove, current.grid.copy(), p, depth, dog);
-				System.out.println("Duration: P"+p+" "+(System.currentTimeMillis()-start));
-				dog.cancel();
+				synchronized(executor) {
+					long start= System.currentTimeMillis();
+					Watchdog dog= timeout==0?Watchdog.getInfinite():Watchdog.getDefault();
+					t.schedule(dog, timeout);
+					tmp= IA.nextMove(lastMove, current.grid.copy(), p, depth, dog);
+					System.out.println("Duration: P"+p+" "+(System.currentTimeMillis()-start));
+					dog.cancel();
+				}
 				present.future= lastMove.future;
 				present.strategy= lastMove.strategy;
 				present.depth= lastMove.depth;
