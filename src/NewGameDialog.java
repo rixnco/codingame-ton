@@ -8,8 +8,10 @@ import java.awt.event.MouseEvent;
 import java.awt.event.MouseListener;
 import java.awt.event.MouseMotionListener;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.ListIterator;
 
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -39,9 +41,9 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 	
 	
 	
-	private Game game= new Game(new Grid(), new ArrayList<PlayerInfo>(4));
+	private Game game= new Game(new Grid(), new ArrayList<PlayerAgent>(4));
 	private Grid g= game.grid;
-	private List<PlayerInfo> players= game.playersInfo;
+	private List<PlayerAgent> players= game.playerAgents;
 	BoardPanel boardPanel;
 	private int xyo,player;
 
@@ -112,13 +114,20 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 		    			LinkedList<Integer> cycle= g.cycles.remove(player);
 		    			for(int xy: cycle) { g.grid[xy]=0; }
 		    			for(int p=player; p<g.nbPlayers-1; ++p) {
-		    				g.head[p]= g.head[p+1];
+		    				g.head[p]= g.head[p+1]; 
 		    				g.alive[p]= g.alive[p+1];
 		    			}
 		    			--g.nbPlayers;
 		    			--g.remainingPlayers;
-		    			
-		    			
+		    			g.head[g.nbPlayers]=0;
+		    			g.alive[g.nbPlayers]= false;
+		    			for(ListIterator<Integer> it= g.moves.listIterator(); it.hasNext(); ) {
+		    				int p= it.next();
+		    				if(p==player) { it.remove(); }
+		    				else if(p>player) it.set(p-1);
+		    			}
+		    			g.player= g.moves.size()==0?-1:g.moves.getLast();
+		    			g.nbMoves= g.moves.size();
 		    			boardPanel.setGrid(g);
 		    			
 		    			okButton.setEnabled(g.nbPlayers>1);
@@ -136,7 +145,7 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 	public void actionPerformed(ActionEvent e) {
 		if("OK".equals(e.getActionCommand())) {
 			for(int p=0; p<g.nbPlayers; ++p) {
-				game.playersInfo.add(new PlayerInfo("P"+p));
+				game.playerAgents.add(new PlayerAgent("P"+p));
 			}
 			NewGameDialog.value=game;
 		}
@@ -157,13 +166,16 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 			}
 		}
 		// New player
-		LinkedList<Integer> newPlayer= new LinkedList<>();
-		newPlayer.add(xy);
-		g.cycles.add(newPlayer);
-		g.head[g.nbPlayers]= xy;
-		g.alive[g.nbPlayers]=true;
-		++g.nbPlayers;
+		player=g.nbPlayers++;
 		++g.remainingPlayers;
+		LinkedList<Integer> cycle= new LinkedList<>();
+		g.cycles.add(cycle);
+		cycle.add(xy);
+		g.head[player]= xy;
+		g.alive[player]=true;
+		g.moves.add(player, player);
+		++g.nbMoves;
+		
 		boardPanel.setGrid(g);
 		okButton.setEnabled(g.nbPlayers>1);
 		
@@ -230,15 +242,20 @@ public class NewGameDialog extends JDialog implements ActionListener, MouseMotio
 		LinkedList<Integer> cycle=g.cycles.get(player); 
 		
 		if(g.grid[xy]==0) {
-			cycle.add(xy);
-			g.head[player]=xy;
 			xyo=xy;
-			g.grid[xy]=1;
+			g.move(player, xy);
 			boardPanel.setGrid(g);
 		} else if(cycle.size()>1) {
 			if(cycle.get(cycle.size()-2)==xy) {
 				g.grid[cycle.removeLast()]=0;
 				g.head[player]=xy;
+				--g.nbMoves;
+				for(Iterator<Integer> it= g.moves.descendingIterator(); it.hasNext(); ) {
+					if(it.next()==player) {
+						it.remove();
+						break;
+					}
+				}
 				boardPanel.setGrid(g);
 				xyo=xy;
 			}

@@ -13,7 +13,7 @@ import java.awt.Insets;
 import java.awt.Font;
 
 
-public class PlayerInfoPanel extends JPanel {
+public class PlayerAgentPanel extends JPanel {
 
 	private JPanel colorPanel;
 	private JLabel lblName;
@@ -24,17 +24,17 @@ public class PlayerInfoPanel extends JPanel {
 	/**
 	 * Create the panel.
 	 */
-	public PlayerInfoPanel() {
+	public PlayerAgentPanel() {
 		init(getBackground());
 	}
 	
-	public PlayerInfoPanel(Color c,PlayerInfo info) {
+	public PlayerAgentPanel(Color c,PlayerAgent agent) {
 		init(c);
 		
-		lblName.setText(info.name);
-		lblRank.setText("["+info.rank+"]");
-		lblScore.setText(""+info.score);
-		lblLanguage.setText(info.language);
+		lblName.setText(agent.name);
+		lblRank.setText("["+agent.rank+"]");
+		lblScore.setText(""+agent.score);
+		lblLanguage.setText(agent.language);
 		
 	}
 	

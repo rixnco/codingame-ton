@@ -6,16 +6,26 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
+import java.util.Scanner;
 import java.util.Timer;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -36,15 +46,18 @@ import javax.swing.JMenuBar;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JScrollPane;
 import javax.swing.JSlider;
 import javax.swing.JSpinner;
 import javax.swing.JSplitPane;
+import javax.swing.JTextArea;
 import javax.swing.JTextPane;
 import javax.swing.JToggleButton;
 import javax.swing.JTree;
 import javax.swing.KeyStroke;
 import javax.swing.SpinnerNumberModel;
+import javax.swing.SwingWorker;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import javax.swing.event.TreeSelectionEvent;
@@ -62,6 +75,9 @@ import org.formbuilder.annotations.UIReadOnly;
 import org.formbuilder.annotations.UITitle;
 import org.formbuilder.mapping.beanmapper.SampleBeanMapper;
 import org.formbuilder.mapping.beanmapper.SampleContext;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
 
 import javax.swing.JTextField;
 import javax.swing.BoxLayout;
@@ -123,16 +139,10 @@ public class TronGUI {
 			if(move==null) return "--";
 			if(move.player==-1) return "--";
 			StringBuffer bf= new StringBuffer();
-			boolean first=true;
-			int p=move.player;
-			do {
-				if(move.dir[p%4].step!=0) {
-					bf.append(first?"P":" P").append(p%4).append("-").append(move.dir[p%4]);
-					first=false;
-				}
-			} while((++p%4)!=move.player);
-			if(first) bf.append("--");
-			else bf.append(" [ "+(move.eval==Move.NaN?"-":TronGUI.format(move.eval, move.strategy))+" / "+(move.value==Move.NaN?"-":TronGUI.format(move.value,move.strategy))+" ]");
+			if(move.dir.step!=0) {
+				bf.append("P").append(move.player).append("-").append(move.dir);
+				bf.append(" [ "+(move.value==Move.NaN?"-":TronGUI.format(move.value, move.strategy))+" / "+(move.eval==Move.NaN?"-":TronGUI.format(move.eval,move.strategy))+" ]");
+			}
 			return bf.toString();
 
 		}
@@ -242,6 +252,7 @@ public class TronGUI {
 	private JMenuItem mntmNew;
 	private JPanel playersPanel;
 	private JPanel gamePanel;
+	private JMenuItem mntmDownload;
 	/**
 	 * Launch the application.
 	 */
@@ -376,7 +387,7 @@ public class TronGUI {
 		playersPanel.setLayout(new BoxLayout(playersPanel, BoxLayout.Y_AXIS));
 		playersPanel.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
 		playersPanel.add(Box.createVerticalGlue());
-		playersPanel.add(new PlayerInfoPanel());
+		playersPanel.add(new PlayerAgentPanel());
 		playersPanel.add(Box.createVerticalGlue());
 		
 		
@@ -494,13 +505,15 @@ public class TronGUI {
 		heuristicButton = new JButton("NONE");
 		heuristicButton.setEnabled(false);
 		heuristicButton.addActionListener(new ActionListener() {
+			Watchdog dog= new Watchdog();
 			public void actionPerformed(ActionEvent e) {
 				if(selectedMove==null) return;
 				if("FIGHT".equals(e.getActionCommand())) {
 					Grid g= selectedMove.grid;
 					Move m= Move.get(selectedMove.move);
 					try {
-						long value= IA.evaluate_maxn(g, g.player, m.opponents, Watchdog.getInfinite());
+						dog.start(0);
+						long value= IA.evaluate_maxn(g, g.player, m.opponents, dog);
 						heuristicField.setText(format(value, Strategy.FIGHT));
 					} catch (Timeout e1) {
 					}
@@ -508,21 +521,24 @@ public class TronGUI {
 					Grid g= selectedMove.grid;
 					Move m= Move.get(selectedMove.move);
 					try {
-						int value= IA.evaluate_alphabeta(g, g.player, m.opponents.get(0), Watchdog.getInfinite());
+						dog.start(0);
+						int value= IA.evaluate_alphabeta(g, g.player, m.opponents.get(0), dog);
 						heuristicField.setText(format(value, Strategy.TERRITORY));
 					} catch (Timeout e1) {
 					}
 				} else 	if("SURVIVAL".equals(e.getActionCommand())) {
 					Grid g= selectedMove.grid;
 					try {
-						int value= IA.floodfill(g, g.head[g.player], Watchdog.getInfinite());
+						dog.start(0);
+						int value= IA.floodfill(g, g.head[g.player], dog);
 						heuristicField.setText(format(value, Strategy.SURVIVAL));
 					} catch (Timeout e1) {
 					}
 				} else if("ADAPTATIVE".equals(e.getActionCommand())) {
 					Grid g= selectedMove.grid;
 					Move m= Move.get();
-					IA.nextMove(m, g, g.player, 0, Watchdog.getInfinite());
+					dog.start(0);
+					IA.nextMove(m, g, g.player, 0, dog);
 					heuristicField.setText(format(m.eval, m.strategy));
 				}
 
@@ -629,6 +645,192 @@ public class TronGUI {
 				}
 			}
 		});
+		
+		mntmDownload = new JMenuItem("Download");
+		mntmDownload.addActionListener(new ActionListener() {
+			public void actionPerformed(ActionEvent e) {
+				final String gameID= JOptionPane.showInputDialog(frame, "Game ID");
+				if(gameID!=null) {
+					
+					final JTextArea msgLabel;
+			        JProgressBar progressBar;
+			        final int MAXIMUM = 100;
+			        JPanel panel;
+
+			        progressBar = new JProgressBar(0, MAXIMUM);
+			        progressBar.setIndeterminate(true);
+			        msgLabel = new JTextArea("Connecting to CodinGame...");
+			        msgLabel.setEditable(false);
+
+			        panel = new JPanel(new BorderLayout(5, 5));
+			        panel.add(msgLabel, BorderLayout.PAGE_START);
+			        panel.add(progressBar, BorderLayout.CENTER);
+			        panel.setBorder(BorderFactory.createEmptyBorder(11, 11, 11, 11));
+
+			        final JDialog dialog = new JDialog();
+			        dialog.getContentPane().add(panel);
+			        dialog.setResizable(false);
+			        dialog.pack();
+			        dialog.setSize(500, dialog.getHeight());
+			        dialog.setLocationRelativeTo(frame);
+			        dialog.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+			        dialog.setAlwaysOnTop(false);
+			        dialog.setVisible(true);
+			        msgLabel.setBackground(panel.getBackground());
+
+			        SwingWorker<Game, String> worker = new SwingWorker<Game,String>() {
+			        	private Game game;
+			            @Override
+			            protected void done() {
+			                // Close the dialog
+			                dialog.dispose();
+			                if(game!=null) {
+			                	initGame(game);
+			                }
+			            }
+
+			            @Override
+			            protected void process(List<String> chunks) {
+			                // Here you can process the result of "doInBackGround()"
+			                // Set a variable in the dialog or etc.
+			            	if(chunks.size()==0) return;
+			            	msgLabel.setText(chunks.get(chunks.size()-1));
+			            }
+
+			            @Override
+			            protected Game doInBackground() throws Exception {
+			                // Do the long running task here
+			                // Call "publish()" to pass the data to "process()"
+			                // return something meaningful
+			            	
+			        		URL url=new URL("http://www.codingame.com/services/gameResultRemoteService/findInformationByIdAndSaveGameV2");
+			        		HttpURLConnection con = (HttpURLConnection) url.openConnection();
+			        		con.setRequestMethod("POST");
+			        		
+			        		String postContent= "["+gameID+",-999]";
+			        		
+			        		con.setDoOutput(true);
+			        		try {
+			        		DataOutputStream wr = new DataOutputStream(con.getOutputStream());
+			        		publish("Connected...");
+			        		wr.writeBytes(postContent);
+			        		wr.flush();
+			        		wr.close();
+			        		publish("Requesting Game "+gameID);
+			        		
+			        		int responseCode = con.getResponseCode();
+//			        		System.out.println("\nSending 'POST' request to URL : " + url);
+//			        		System.out.println("Post content : " + postContent);
+//			        		System.out.println("Response Code : " + responseCode);
+
+			        		if(responseCode!= 200) {
+			        			publish("Unable to retreive game: error "+responseCode);
+			        			return null;
+			        		}
+			        		publish("Downloading Game "+gameID);
+			        		
+			        		BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+			        		String inputLine;
+			        		StringBuffer response = new StringBuffer();
+			         
+			        		while ((inputLine = in.readLine()) != null) {
+			        			response.append(inputLine);
+			        		}
+			        		in.close();
+			        		
+			        		
+			        		JSONParser parser= new JSONParser();
+			        		JSONObject resp= (JSONObject) parser.parse(response.toString());
+			        		JSONArray players= (JSONArray) ((JSONObject) resp.get("success")).get("playersAgents");
+			        		//		"agentId": 31988,
+			        		//		"candidateId": 307499,
+			        		//		"campaignId": 6933,
+			        		//		"playerName": "Alexandre",
+			        		//		"programmingLanguageId": "Java",
+			        		//		"score": 35.9742537605519,
+			        		//		"creationTime": 1401993065150,
+			        		//		"valid": true,
+			        		//		"questionId": 13083,
+			        		//		"rank": 79,
+			        		//		"gamesPlayed": 100,
+			        		//		"progress": "EQUAL"		
+			        		
+			        		int nbPlayers= players.size();
+			        		
+			        		
+			        		
+			        		JSONObject gameResult= (JSONObject)((JSONObject) resp.get("success")).get("gameResult");
+			        		JSONArray positions= (JSONArray)gameResult.get("positions");
+			        		JSONArray infos= (JSONArray)gameResult.get("positions");
+			        		JSONArray views= (JSONArray)gameResult.get("views");
+			        		JSONArray errors= (JSONArray)gameResult.get("errors");
+			        		JSONArray scores= (JSONArray)gameResult.get("scores");
+			        		JSONArray ids= (JSONArray)gameResult.get("ids");
+			        		JSONArray outputs= (JSONArray)gameResult.get("outputs");
+			        		String uinputs= (String) gameResult.get("uinputs");
+			        		
+		        			List<PlayerAgent> playersInfo= new ArrayList<PlayerAgent>(players.size());
+		        			
+		        			for(int p=0; p<nbPlayers; ++p) {
+		        				JSONObject playerAgent= (JSONObject) players.get(p);
+		        				PlayerAgent player= new PlayerAgent();
+		        				player.name= (String) playerAgent.get("playerName");
+		        				Object o=playerAgent.get("rank");
+		        				player.rank= o==null?0:((Long)o).intValue();
+		        				o=playerAgent.get("score");
+		        				player.score= o==null?0:((Double) o).floatValue();
+		        				o=playerAgent.get("programmingLanguageId");
+		        				player.language= o==null?"--":o.toString();
+		        				playersInfo.add(player);
+		        			}
+		        			Grid grid= new Grid(nbPlayers);
+		        			for(Object o :views) {
+		        				String entry= (String)o;
+		        				if(entry.startsWith("KEY_FRAME")) processKeyFrame(entry, grid);
+		        			}
+		        			game= new Game(grid, playersInfo);
+			        		} catch(IOException ex) {
+			        			publish("Connection failed: "+ex.getMessage());
+			        			game=null;
+			        		}
+			        		return game;
+			            }
+			            
+			        	void processKeyFrame(String keyFrame, Grid grid) {
+			        		@SuppressWarnings("resource")
+			        		Scanner	frame= new Scanner(keyFrame);
+			        		frame.nextLine();
+			        		while(frame.hasNextInt()) {
+			        			int p= frame.nextInt(); frame.nextLine();
+			        			int nbMoves= frame.nextInt(); frame.nextLine();
+			        			if(nbMoves>0) {
+			        				for(int m=1; m<=nbMoves; ++m) {
+			        					int x= 1+frame.nextInt();
+			        					int y= 1+frame.nextInt();
+			        					if(m==nbMoves) {
+			        						grid.move(p, y*32+x);
+			        					}
+			        					frame.nextLine();
+			        				}
+			        			} else if(grid.alive[p]==true) {
+			        				// Kill player
+			        				grid.move(p, Direction.NONE);
+			        			}
+			        			
+			        		}
+			        		
+			        	}
+
+			        };
+
+			        worker.execute();
+					
+				}
+				
+			}
+		});
+		mntmDownload.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_D, InputEvent.CTRL_MASK));
+		mnGame.add(mntmDownload);
 		mnGame.add(mntmSave);
 		
 		loadGame(DEFAULT_GAME);
@@ -654,7 +856,7 @@ public class TronGUI {
 			}
 			Grid g= selectedMove.grid;
 			
-			GameUtils.store(new Game(g, game.playersInfo),file);
+			GameUtils.store(new Game(g, game.playerAgents),file);
 			
 		} catch (IOException e) {
 		}
@@ -665,9 +867,9 @@ public class TronGUI {
 		this.game= game;
 		playersPanel.removeAll();
 		playersPanel.add(Box.createVerticalGlue());
-		for(int p=0; p<game.playersInfo.size(); ++p) {
-			PlayerInfo info= game.playersInfo.get(p);
-			playersPanel.add(new PlayerInfoPanel(BoardPanel.playerColor[p], info));
+		for(int p=0; p<game.playerAgents.size(); ++p) {
+			PlayerAgent info= game.playerAgents.get(p);
+			playersPanel.add(new PlayerAgentPanel(BoardPanel.playerColor[p], info));
 		}
 		playersPanel.add(Box.createVerticalGlue());
 		
@@ -877,11 +1079,33 @@ public class TronGUI {
 		}
 	}
 	
-	private class GameRunner implements Runnable {
+	class InternalPlayerExecutor implements PlayerExecutor {
+		GameRunner runner;
+		Watchdog dog= new Watchdog();
+		
+		InternalPlayerExecutor(GameRunner runner) {
+			this.runner= runner;
+		}
+		
+		@Override
+		public Move nextMove(Grid g, int player) {
+			Move present= Move.get();
+			dog.start(runner.timeout);
+			Move m= IA.nextMove(present, g, player, runner.depth, dog);
+			if(m!=null) present.future.remove(m);
+			present.dispose();
+			return m;
+		}
+		
+	}
+	
+	
+	class GameRunner implements Runnable {
 		private ExtendedMove emove;
 		private Strategy strategy;
 		private int depth;
 		private int timeout;
+		private Watchdog dog= new Watchdog();
 		public GameRunner(ExtendedMove m, Strategy strategy, int depth, int timeout) {
 			this.emove = m;
 			this.strategy= strategy;
@@ -900,33 +1124,31 @@ public class TronGUI {
 			do {
 				int p= current.grid.nextPlayer();
 				
-				Move lastMove= lastPlayerMove[p];
-				if(lastMove==null) lastMove= Move.get();
-				if(!lastMove.future.isEmpty()) {
-	      			// Try to find if we've already evaluated this position
-					switch(lastMove.strategy) {
-					case TERRITORY:
-		      			for(Iterator<Move> it= lastMove.future.iterator(); it.hasNext(); ) {
-		      				Move f= it.next();
-		      				if(!f.match(present)) continue;
-		      				it.remove();
-		      				lastMove=f;
-		      				break;
-		      			}
-		      			break;
-					case FIGHT:
-						// TODO: Try to find matching future
-						lastMove.future.clear();
-						break;
-					}
-				}
+//				Move lastMove= lastPlayerMove[p];
+//				if(lastMove==null) lastMove= Move.get();
+//				if(!lastMove.future.isEmpty()) {
+//	      			// Try to find if we've already evaluated this position
+//					switch(lastMove.strategy) {
+//					case TERRITORY:
+//		      			for(Iterator<Move> it= lastMove.future.iterator(); it.hasNext(); ) {
+//		      				Move f= it.next();
+//		      				if(!f.match(present)) continue;
+//		      				it.remove();
+//		      				lastMove=f;
+//		      				break;
+//		      			}
+//		      			break;
+//					case FIGHT:
+//						// TODO: Try to find matching future
+//						lastMove.future.clear();
+//						break;
+//					}
+//				}
+				Move lastMove= Move.get();
 				synchronized(executor) {
-					long start= System.currentTimeMillis();
-					Watchdog dog= timeout==0?Watchdog.getInfinite():Watchdog.getDefault();
-					t.schedule(dog, timeout);
+					dog.start(timeout);
 					tmp= IA.nextMove(lastMove, current.grid.copy(), p, depth, dog);
-					System.out.println("Duration: P"+p+" "+(System.currentTimeMillis()-start));
-					dog.cancel();
+					System.out.println("Duration: P"+p+" "+dog.elapsed());
 				}
 				present.future= lastMove.future;
 				present.strategy= lastMove.strategy;
@@ -936,12 +1158,10 @@ public class TronGUI {
 					tmp= Move.get(p, Direction.NONE);
 				} 
 				Grid g= tmp.move(current.grid.copy());
-				lastPlayerMove[p]= Move.get(tmp);
+//				lastPlayerMove[p]= Move.get(tmp);
 				
 				// Update present
-				present= Move.get(-1, present.dir);
-				present.player=p;
-				present.dir[p]=tmp.dir[p]==Direction.NONE?Direction.ANY:tmp.dir[p];
+				present= Move.get(p, tmp.dir);
 				
 				current= new ExtendedMove(present, g, strategy, depth, timeout);
 				gameStates.add(current);

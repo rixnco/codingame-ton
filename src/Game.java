@@ -4,10 +4,10 @@ import java.util.List;
 public class Game {
 	public Game() {
 	}
-	public Game(Grid g, List<PlayerInfo> playersInfo) {
+	public Game(Grid g, List<PlayerAgent> playerAgents) {
 		this.grid=g;
-		this.playersInfo= playersInfo;
+		this.playerAgents= playerAgents;
 	}
 	public Grid grid;
-	public List<PlayerInfo> playersInfo;
+	public List<PlayerAgent> playerAgents;
 }

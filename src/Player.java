@@ -10,8 +10,7 @@ final class Player {
     Move present=null;
     final Grid grid= new Grid();
     final Grid tmp= new Grid();
-	final Timer timer= new Timer();
-    Watchdog dog;
+    final Watchdog dog=new Watchdog();
     static public void main(String[] args) {
     	new Player().play();
     }
@@ -28,16 +27,16 @@ final class Player {
         int N = in.nextInt(); // total number of players (2 to 4).
         int P = in.nextInt(); // your player number (0 to 3).
         in.nextLine();
+  		dog.start(TIMEOUT);
         grid.setNbPlayers(N);
         int[] XY0= new int[N];
         int[] XY1= new int[N];
         boolean[] alive= new boolean[] { 0<N, 1<N, 2<N, 3<N };
         boolean firstRound=true;
-        Move current;
+        Direction[] round= new Direction[] { Direction.NONE, Direction.NONE, Direction.NONE, Direction.NONE };
         int p;
         while (true) {
         	System.arraycopy(XY1, 0, XY0, 0, N);
-        	current= Move.get(0);
             for (int i = 0; i < N; i++) {
                 final int X0 = in.nextInt()+1; // starting X coordinate of lightcycle (or 0)
                 final int Y0 = in.nextInt()+1; // starting Y coordinate of lightcycle (or 0)
@@ -51,47 +50,45 @@ final class Player {
                 }
                 if(X0==0 && alive[p]) { // Suicide player
                 	grid.move(p,0);
-                	continue;
                 }
 	            XY1[p]= Grid.getXY(X1, Y1);
 	            Direction d= Direction.fromTo(XY0[p], XY1[p]);
-	            if(d!=Direction.NONE) current.append(p, d);
+	            round[p]= d;
             }
         	firstRound=false;
-    		dog= new Watchdog();
-      		timer.schedule(dog, TIMEOUT);
       		// Apply move
-      		current.move(grid);
-      		if(present!=null && Arrays.equals(alive, grid.alive)) {
-      			// No player died
-      			Move evaluated=null;
-      			switch(present.strategy){ 
-      			case TERRITORY:
-	      			// Try to find if we've already evaluated this position
-	      			for(Iterator<Move> it= present.future.iterator(); it.hasNext(); ) {
-	      				Move f= it.next();
-	      				if(!f.match(current)) continue;
-	      				evaluated=f;
-	      				it.remove();
-	      				break;
-	      			}
-	      			break;
-      			case SURVIVAL:
-      				evaluated=present;
-      				present=null;
-      				break;
-      			}
-      			if(evaluated!=null) {
-      				current.dispose(false);
-      				current=evaluated;
-      			}
-      		} 
+      		for(p=0; p<N; ++p) if(round[p]!=Direction.NONE) grid.move(p, round[p]);
+//      		if(present!=null && Arrays.equals(alive, grid.alive)) {
+//      			// No player died
+//      			Move evaluated=null;
+//      			switch(present.strategy){ 
+//      			case TERRITORY:
+//	      			// Try to find if we've already evaluated this position
+//	      			for(Iterator<Move> it= present.future.iterator(); it.hasNext(); ) {
+//	      				Move f= it.next();
+//	      				if(!f.match(current)) continue;
+//	      				evaluated=f;
+//	      				it.remove();
+//	      				break;
+//	      			}
+//	      			break;
+//      			case SURVIVAL:
+//      				evaluated=present;
+//      				present=null;
+//      				break;
+//      			}
+//      			if(evaluated!=null) {
+//      				current.dispose(false);
+//      				current=evaluated;
+//      			}
+//      		} 
   			if(present!=null) present.dispose(false);
-  			present=current;
+//  			present=current;
+  			present= Move.get();
         	tmp.copy(grid);
         	Move best= IA.nextMove(present, tmp, 0, DEPTH, dog);
         	if(best!=null) {
-	   			out.println(best.dir[0]); 
+	   			out.println(best.dir); 
 	        	out.flush();	
         	} else {
     			out.println("Your father was the Creator, Sam! Make it there alive and he'll find you...");
@@ -99,7 +96,6 @@ final class Player {
     			break;
         	}
     		// Do some house cleaning
-    		dog.cancel();
 			present.future.remove(best);
     		present.dispose();
 			present=best;
@@ -108,6 +104,7 @@ final class Player {
 	        in.nextInt(); // total number of players (2 to 4).
 	        in.nextInt(); // your player number (0 to 3).
 	        in.nextLine();
+	  		dog.start(TIMEOUT);
 		}
 	}
 }
@@ -242,18 +239,18 @@ final class IA {
 		if(g.alive[player])g.calculateTerritory(player);
 		// Build articulations for all player in our component
 		g.resetArticulations();
-		for(int t=1; t<opponents.size(); ++t) {
-			p=opponents.get(t);
-			if(!g.alive[p]) continue;
-			g.hideHead(p);
-			g.calculateArticulations(g.head[p], g.territory);
-			g.restoreHead(p);
-		}
-		if(g.alive[player]) {
-			g.hideHead(player);
-			g.calculateArticulations(g.head[player], g.territory);
-			g.restoreHead(player);
-		}
+//		for(int t=1; t<opponents.size(); ++t) {
+//			p=opponents.get(t);
+//			if(!g.alive[p]) continue;
+//			g.hideHead(p);
+//			g.calculateArticulations(g.head[p], g.territory);
+//			g.restoreHead(p);
+//		}
+//		if(g.alive[player]) {
+//			g.hideHead(player);
+//			g.calculateArticulations(g.head[player], g.territory);
+//			g.restoreHead(player);
+//		}
 		// Compute remaining space
 		long res=0;
 		Space ccount;
@@ -318,6 +315,8 @@ final class IA {
 		final int opponent=opponents.get(0);
 		dog.check();
 		++ab_runs;
+		present.strategy= Strategy.TERRITORY;
+		present.depth=itr;
 		// last iteration?
 		if (itr==0) {
 			// We're evaluating present if not already done !!
@@ -326,8 +325,6 @@ final class IA {
 				present.eval= evaluate_alphabeta(g, forPlayer, opponent, dog);
 			}
 			present.value= present.eval;
-			present.strategy= Strategy.TERRITORY;
-			present.depth=itr;
 			present.opponents=opponents;
 			return null;
 		}
@@ -513,46 +510,6 @@ final class IA {
 		//System.out.println("maxSpace"+Grid.toXYString(xy)+"="+maxspace);
 		return maxspace;
 	}
-	final static void explore_space(final Space result, final Grid g, final List<Integer> exits, final int v, final int[] territory, final int pID) {
-		if ((g.num[v]&pID)==pID) return; // redundant; already explored
-		if (Cell.at(v)==Cell.RED) ++result.red;
-		else ++result.black;
-		g.num[v]|= pID; // mark with pID
-		if (g.articd[v]!=0) {
-			// we're an articulation vertex; nothing to do but populate the exits
-			for (Direction d : Direction.ALL) {
-				int w= v+d.step;
-				if (g.grid[w]!=0) continue;
-				++result.edges;
-				if (territory!=null&&(territory[w]&pID)!=pID) {
-					result.front=1;
-					continue;
-				}
-				if ((g.num[w]&pID)==pID) continue; // use 'num' from articulation vertex pass to mark nodes used
-				if(!exits.contains(w))	exits.add(w);
-			}
-		} else {
-			// this is a non-articulation vertex
-			for (Direction d : Direction.ALL) {
-				int w= v+d.step;
-				if (g.grid[w]!=0) continue;
-				++result.edges;
-				// filter out nodes not in our territory region
-				if (territory!=null&&(territory[w]&pID)!=pID) {
-					result.front=1;
-					continue;
-				}
-				if ((g.num[w]&pID)==pID) continue; // use 'num' from articulation vertex pass to mark nodes used
-				if (g.articd[w]!=0) { // is this vertex articulated? thenadd it as an exit and don't traverse it yet
-					if(!exits.contains(w))	exits.add(w);
-				} else {
-					Space s= new Space();
-					explore_space(s, g, exits, w, territory, pID);
-					result.add(s);
-				}
-			}
-		}
-	}
 //	static private ArrayDeque<Integer> current= new ArrayDeque<Integer>(40);
 //	static private ArrayDeque<Integer> next= new ArrayDeque<Integer>(40);
 //	static private ArrayDeque<Integer> tmp;
@@ -621,50 +578,43 @@ final class IA {
 			present.player= player;
 			present.strategy= Strategy.SURVIVAL;
 		}
-		int maxitr=0;
 		Move best= null;
 		try {
 		for (itr= 1; itr<=maxDepth; itr++) {
-			if (dog.panic) break;
+			if (dog.timeout()) break;
+			if(area < itr) 	break; // Useless to search deeper"
 			Move m= spacefill(present, grid, player, itr, dog);
-			maxitr= itr;
 			if(m==null) continue;
 			if (best==null || BEST_SURVIVAL_FIRST.compare(m,best)<0) {
 				if(best!=null) best.dispose(false);
 				best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
-			}
-			if (best.value<=itr) {
-				break; // we can't possibly search any deeper TODO ???
-			}
-			if (best.value>=area) {
-				break; // solved!
+				if (best.value>=area) {
+					break; // solved!
+				}
 			}
 		}
 		} catch(Timeout t) {
 		}
-		present.depth=maxitr;
 		return best;
 	}
 	final static Move spacefill(final Move present, final Grid g, final int player, final int itr, final Watchdog dog) throws Timeout {
 		dog.check();
 		final int head= g.head[player];
-		int degree=g.degree(head); 
+		final int degree=g.degree(head); 
+		present.strategy=Strategy.SURVIVAL;
+		present.depth=itr;
 		if (degree==0) {
-			present.eval= 0;
-			present.value= 0;
-			present.strategy=Strategy.SURVIVAL;
-			present.depth=itr;
+			present.eval= 1;
+			present.value= 1;
 			return null;
 		}
 		if (itr==0) {
 			// We're evaluating present
 			if(present.eval==Move.NaN) {
 				present.degree= degree;
-				present.eval= floodfill(g, head, dog);
+				present.eval= 1+floodfill(g, head, dog);
 			}
-			present.depth=itr;
 			present.value=present.eval;
-			present.strategy=Strategy.SURVIVAL;
 			return null;
 		}
 		if (present.future.size()==0) {
@@ -676,56 +626,52 @@ final class IA {
 		}
 		Collections.sort(present.future, BEST_SURVIVAL_FIRST);		
 		int spacesleft= g.fillableAreaAt(head);
-		Move bestf= null;
+		Move best= null;
 		for (Move f : present.future) {
+			dog.check();
 			f.move(g);
 			spacefill(f, g, player, itr-1, dog);
 			f.unmove(g);
-			if (bestf==null || BEST_SURVIVAL_FIRST.compare(f, bestf)<0) {
-				bestf= f;
+			if (best==null || BEST_SURVIVAL_FIRST.compare(f, best)<0) {
+				best= f;
 			}
-			if (bestf.value==spacesleft) break; // we solved it!
-			dog.check();
+			if (best.value==spacesleft) break; // we solved it!
 		}
-		assert(bestf!=null);
-		present.value= (bestf==null?0:bestf.value);
-		present.depth=itr;
-		return bestf;
+		present.value= best.value;
+		return best;
 	}
 	final static public int floodfill(final Grid g, final int xy, final Watchdog dog) throws Timeout {
 		// flood fill heuristic: choose to remove as few edges from the graph as
 		// possible (in other words, move onto the square with the lowest degree)
 		dog.check();		
-		int bestv= 0;
-		int b= xy;
+		int bestv= -1;
+		int best= xy;
 		for (Direction d : Direction.ALL) {
 			int xyd= xy+d.step;
 			if (g.grid[xyd]!=0) continue;
 			int v= g.connectedValueAt(xyd)+g.fillableAreaAt(xyd)-2*g.degree(xyd)-4*g.isArticulation(xyd);
 			if (v>bestv) {
 				bestv= v;
-				b= xyd;
+				best= xyd;
 			}
 		}
-		if (bestv==0) return 0;
+		if (bestv<0) return 0;
 		int a;
-		g.grid[b]= 1; g.removeFromComponents(b);
-		a= 1+floodfill(g, b, dog);
-		g.grid[b]= 0; g.addToComponents(b);
+		g.grid[best]= 1; g.removeFromComponents(best);
+		a= 1+floodfill(g, best, dog);
+		g.grid[best]= 0; g.addToComponents(best);
 		return a;
 	}	
 	static final public Comparator<Move> BEST_SURVIVAL_FIRST= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
-				if(o1.value==Move.NaN) return 1; // put not eval'd last
+			if(o1.value==Move.NaN || o2.value==Move.NaN) {
 				if(o2.value==Move.NaN) return -1; // put not eval'd last
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
 			}
-			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
-				if(o1.value>o2.value) return -1;
-				if(o1.value<o2.value) return 1;
-			}
+			if(o1.value>o2.value) return -1;
+			if(o1.value<o2.value) return 1;
 			// --> Compare degree
 			if(o1.degree==-1 && o2.degree==-1) return 0;
 			if(o1.degree==-1) return 1;
@@ -739,14 +685,12 @@ final class IA {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
-				if(o1.value==Move.NaN) return 1; // put not eval'd last
+			if(o1.value==Move.NaN || o2.value==Move.NaN) {
 				if(o2.value==Move.NaN) return -1; // put not eval'd last
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
 			}
-			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
-				if(o1.value>o2.value) return -1;
-				if(o1.value<o2.value) return 1;
-			}
+			if(o1.value>o2.value) return -1;
+			if(o1.value<o2.value) return 1;
 			// --> Compare degree
 			if(o1.degree==-1 && o2.degree==-1) return 0;
 			if(o1.degree==-1) return 1;
@@ -760,14 +704,12 @@ final class IA {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
-				if(o1.value==Move.NaN) return 1; // put null last
+			if(o1.value==Move.NaN || o2.value==Move.NaN) {
 				if(o2.value==Move.NaN) return -1; // put null last
+				if(o1.value==Move.NaN) return 1; // put null last
 			}
-			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
-				if(o1.value>o2.value) return 1;
-				if(o1.value<o2.value) return -1;
-			}
+			if(o1.value>o2.value) return 1;
+			if(o1.value<o2.value) return -1;
 			// o1.value and o2.value are null
 			// --> compare degree
 			if(o1.degree==-1 && o2.degree==-1) return 0;
@@ -799,20 +741,6 @@ final class IA {
 			}
 			if(v1<v2) return -1;
 			if(v1>v2) return 1;
-			
-//			long min1=Long.MAX_VALUE;
-//			long min2=Long.MAX_VALUE;
-//			for(int p=0; p<4; ++p) {
-//				if(p==o1.player) continue;  // ignore our value
-//				v1= (o1.value>>(16*p))&0xFFFF;
-//				if(v1==0) continue;   // ignore non eval'd players ==> TODO Change this value to -1 / 0xFFFF
-//				if(min1>v1) min1=v1;
-//				
-//				v2= (o2.value>>(16*p))&0xFFFF;
-//				if(min2>v2) min2=v2;
-//			}
-//			if(min1<min2) return -1;
-//			if(min1>min2) return 1;
 			return 0;
 		}
 	};
@@ -888,8 +816,6 @@ final class Grid {
 	 public short[] low= new short[AREA];
 	 public short[] num= new short[AREA];
 	 public short[] articd= new short[AREA];
-    // Statistics
-    static int counter=0;
 	public Grid() {
         this(0);
 	}
@@ -903,11 +829,9 @@ final class Grid {
 			grid[y*WIDTH+WIDTH-1]= 0x1;
 		}
 		setNbPlayers(nbPlayers);
-		++counter;
 	}
 	protected Grid(Grid src) {
 	    copy(src);
-		++counter;
 	}
 	final public Grid copy() {
 		return new Grid(this);
@@ -968,6 +892,7 @@ final class Grid {
 			cycles.add(new LinkedList<Integer>());
 		}
 		nbMoves=0;
+		moves.clear();
 		dirtyComponents=true;
 		dirtyArticulations=true;
 		dirtyTerritory=true;
@@ -990,6 +915,8 @@ final class Grid {
 				grid[idx]= 0;
 			}
 			dirtyComponents=true;
+			dirtyTerritory=true;
+			dirtyArticulations=true;
 		}
 	}
 	final private void resurectPlayer(final int p) {
@@ -1001,6 +928,8 @@ final class Grid {
 			head[p]= cycles.get(p).getLast();
 			++remainingPlayers;
 			dirtyComponents=true;
+			dirtyTerritory=true;
+			dirtyArticulations=true;
 		}
 	}
 	final public boolean move(final int p, final int xy) {
@@ -1034,7 +963,7 @@ final class Grid {
 			int xy= head[player];
 			grid[xy]= 0;
 			removeFromComponents(xy);
-			head[player]= cycles.get(player).isEmpty()?-1:cycles.get(player).getLast();
+			head[player]= cycles.get(player).isEmpty()?0:cycles.get(player).getLast();
 		}
 		player=(moves.isEmpty()?-1:moves.getLast());
 		dirtyArticulations=true;
@@ -1103,15 +1032,16 @@ final class Grid {
 		if(force) dirtyComponents=true;
 		calculateComponents();
 	}
-	static ListInt equiv= new ListInt(1024);
+	static ListInt equiv= new ListInt(600);
 	final public void calculateComponents() {
 		if(!dirtyComponents) return;
 
 		Arrays.fill(components, (short)0);
+		equiv.clear();
 		equiv.add((short)0);
 		short group=1;
 		int idx= FIRST;
-		for(idx= FIRST; idx<=LAST; ++idx) {
+		for(; idx<=LAST; ++idx) {
 			if(grid[idx]!=0) continue;
 			short up= (short)equiv.get(components[idx+Direction.UP.step]);
 			short left= (short)equiv.get(components[idx+Direction.LEFT.step]);
@@ -1206,14 +1136,12 @@ final class Grid {
 		return cedges[components[idx]]; 
 	}
 	  // number of fillable squares in area when starting on 'startcolor' (assuming starting point is not included)
-	final private int fillableArea(int component, Cell startColor) {
+	final private int fillableArea(int comp, Cell startColor) {
 		  if(startColor==Cell.RED) { // start on red?  then moves are black-red-black-red-black (2 red, 3 black: 5; 3 red 3 black: 6; 4 red 3 black
-			    return 2*(red[component]-1<black[component]? red[component]-1:black[component]) +
-			      (black[component] >= red[component] ? 1 : 0);
-			  } else { // moves are red-black-red-black-red
-			    return 2*(red[component]<black[component]-1? red[component]:black[component]-1) +
-			      (red[component] >= black[component] ? 1 : 0);
-			  }
+			  return 2*((red[comp]-1)<black[comp]?(red[comp]-1):black[comp])+(black[comp]>=red[comp]?1:0);			  
+		  } else { // moves are red-black-red-black-red
+			  return 2*(red[comp]<(black[comp]-1)?red[comp]:(black[comp]-1))+(red[comp]>=black[comp]?1:0);
+		  }
 	  }	
 	//	Articulations
 	final public void resetArticulations() {
@@ -1268,22 +1196,14 @@ final class Grid {
 	final public void calculateTerritory(int p) {
 		if(alive[p]) calculateTerritory(head[p], p);
 	}
-//	static ArrayDeque<Integer> current= new ArrayDeque<Integer>(10);
-//	static ArrayDeque<Integer> next= new ArrayDeque<Integer>(10);
-//	static ArrayDeque<Integer> temp;
-	
 	static ListInt current= new ListInt(1024);
 	static ListInt next= new ListInt(1024);
 	static ListInt temp;
-	
-	
 	final public void calculateTerritory(int xy, int player) {
 		dirtyTerritory=false;
-
 		short pID= (short) (1<<(12+player));
 		next.clear();
 		current.clear();
-		
 		next.add(xy);
 		territory[xy]=pID;
 		short dist=0;
@@ -1292,7 +1212,6 @@ final class Grid {
 			temp=current;
 			current= next;
 			next=temp;
-			
 			while(!current.isEmpty()) {
 				xy= current.remove();
 				for(Direction d: Direction.ALL) {
@@ -1306,43 +1225,27 @@ final class Grid {
 					}
 				}
 			}
-			
 		} while(!next.isEmpty());
 	}
 }
 enum Cell {
 	BLACK(0), RED(1);
-
 	final int id;
-	private Cell(int id) {
-		this.id=id;
-	}
-	
-	static final public Cell at(final int idx) {
-		return ((idx ^ (idx>>5)) & 1)==1?RED:BLACK;
-	}
-	
-	static final public Cell at(final int x, final int y) {
-		return ((x ^ y) & 1)==1?RED:BLACK;
-	}
+	private Cell(int id) { this.id=id; }
+	static final public Cell at(final int idx) { return ((idx ^ (idx>>5)) & 1)==1?RED:BLACK; }
+	static final public Cell at(final int x, final int y) { return ((x ^ y) & 1)==1?RED:BLACK; }
 }
 enum Direction {
 	NONE(0), LEFT(-1), RIGHT(1), UP(-Grid.WIDTH), DOWN(Grid.WIDTH), ANY(0);
 	static final Direction[] ALL= new Direction[] { LEFT, UP, RIGHT, DOWN };
 	public final int step;
-	private Direction(int delta) {
-		this.step= delta;
-	}
+	private Direction(int delta) { this.step= delta; }
 	static final Direction fromTo(int xy0, int xy1) {
 		switch (xy1-xy0) {
-		case -1:
-			return LEFT;
-		case 1:
-			return RIGHT;
-		case Grid.WIDTH:
-			return DOWN;
-		case -Grid.WIDTH:
-			return UP;
+		case -1: return LEFT;
+		case 1: return RIGHT;
+		case Grid.WIDTH: return DOWN;
+		case -Grid.WIDTH: return UP;
 		}
 		return NONE;
 	}
@@ -1362,7 +1265,7 @@ final class Move {
 	static public final long MAX=NaN-1;
 	static public final long MIN=-MAX;	
 	public int 		   player=-1;
-	public Direction[] dir= new Direction[] { Direction.ANY,Direction.ANY,Direction.ANY,Direction.ANY};
+	public Direction dir= Direction.ANY;
 	public long eval= NaN;
 	public long value= NaN;
 	public int degree= -1;
@@ -1374,7 +1277,7 @@ final class Move {
 	}
 	private Move(int player, Direction dir) {
 		this.player=player;
-		this.dir[player]=dir;
+		this.dir=dir;
 	}
 	final public int size() {
 		int s= future.size();
@@ -1394,34 +1297,16 @@ final class Move {
 			pendingPool.add(this);
 		}
 	}	
-	final public Move append(int player, Direction d) {
-		this.player=this.player==-1?player:this.player;
-		dir[player]=d;
-		return this;
-	}	
 	final public boolean match(Move other) {
-		for(int p=0; p<4; ++p) {
-			if(dir[p]==Direction.ANY || other.dir[p]==Direction.ANY) continue;
-			if(dir[p]!=other.dir[p]) return false;
-		}
-		return true;
+		if(dir==Direction.ANY || other.dir==Direction.ANY || dir==other.dir) return true;
+		return false;
 	}	
 	final public Grid move(Grid g) {
-		if(player!=-1) {
-			int p=player;
-			do{
-				if(dir[p]!=Direction.ANY) g.move(p, dir[p]);
-			} while((p=(++p)%4)!=player);
-		}
+		if(player!=-1 && dir!=Direction.ANY) g.move(player, dir);
 		return g;
 	}
 	final public Grid unmove(Grid g) {
-		if(player!=-1) {
-			for(int p=0; p<4; ++p) {
-				// We assume that the previous move was this one
-				if(dir[p]!=Direction.ANY) g.unmove();
-			}
-		}
+		if(player!=-1 && dir!=Direction.ANY) g.unmove();
 		return g;
 	}	
 	final public void reset() {
@@ -1429,7 +1314,7 @@ final class Move {
 	}
 	final public void reset(boolean immediate) {
 		player=-1;
-		for(int p=0; p<4; ++p) dir[p]= Direction.ANY;
+		dir= Direction.ANY;
 		eval=NaN;
 		value= NaN;
 		degree=-1;
@@ -1442,16 +1327,10 @@ final class Move {
 	final public String toString() {
 		if(player==-1) return "--";
 		StringBuffer bf= new StringBuffer();
-		boolean first=true;
-		int p=player;
-		do {
-			if(dir[p%4].step!=0) {
-				bf.append(first?"P":" P").append(p%4).append("-").append(dir[p%4]);
-				first=false;
-			}
-		} while((++p%4)!=player);
-		if(first) bf.append("--");
-		else bf.append(" [ "+(eval==NaN?"-":eval)+" / "+(value==NaN?"-":value)+" ]");
+		if(dir.step!=0) {
+			bf.append("P").append(player).append("-").append(dir);
+			bf.append(" [ "+(value==NaN?"-":value)+" / "+(eval==NaN?"-":eval)+" ]");
+		}
 		return bf.toString();
 	}
 	// Moves pool !!!
@@ -1459,8 +1338,8 @@ final class Move {
 	static MoveList pendingPool= new MoveList();
 	static final public Move get(Move src)  {
 		Move m= get();
-		System.arraycopy(src.dir, 0, m.dir, 0, 4);
 		m.player=src.player;
+		m.dir=src.dir;
 		m.eval= src.eval;
 		m.value= src.value;
 		m.degree= src.degree;
@@ -1477,14 +1356,8 @@ final class Move {
 	}
 	static final public Move get(int player, Direction d)  {
 		Move m= get();
-		m.dir[player]=d;
 		m.player=player;
-		return m;
-	}
-	static final public Move get(int player, Direction[] dir)  {
-		Move m= get();
-		m.player=player;
-		System.arraycopy(dir, 0, m.dir, 0, 4);
+		m.dir=d;
 		return m;
 	}
 	static final public Move get() {
@@ -1505,78 +1378,36 @@ final class Move {
 	}
 }
 final class MoveList extends LinkedList<Move> {
-	public final void clear() {
-		while(!isEmpty()) remove().dispose();
-	}
+	public final void clear() { while(!isEmpty()) remove().dispose(); }
 }
-class Watchdog extends TimerTask {
-	static public Watchdog getInfinite() {
-		return new Watchdog() {
-			@Override
-			public void run() {}
-			@Override
-			public void check() {}
-		};
-	}
-	static final public Watchdog getDefault() {
-		return new Watchdog();
-	}
-	
-	static final Timeout timeout= new Timeout();
-	public boolean panic=false;
-	@Override
-	public void run() {
-		panic=true;
-	}
-	public void check() throws Timeout {
-		if(panic) throw timeout;
-	}
+class Watchdog {
+	static final Timeout timeoutEx= new Timeout();
+	public long _timeout;
+	public long _start;
+	public void start(long timeout) { _timeout= timeout; _start= System.currentTimeMillis(); }
+	public void check() throws Timeout { if(_timeout>0 && System.currentTimeMillis()-_start>=_timeout) throw timeoutEx; }
+	public boolean timeout() { return _timeout>0?(System.currentTimeMillis()-_start>=_timeout):false; }
+	public long elapsed() { return System.currentTimeMillis()-_start; }
 }
-final class Timeout extends Exception {
-}
+final class Timeout extends Exception {}
 final class Space {
 	int red, black, edges, front;
 	Space() {}
-	Space(Space o) {
-		red= o.red;
-		black= o.black;
-		edges= o.edges;
-		front= o.front;
-	}
-	Space(int r, int b, int e, int f) {
-		red= r;
-		black= b;
-		edges= e;
-		front= f;
-	}
-	final Space add(Space o) {
-		red+= o.red;
-		black+= o.black;
-		edges+= o.edges;
-		front+= o.front;
-		return this;
-	}
-	final Space add(int xy) {
-		if(Cell.at(xy)==Cell.RED) 
-			++red; 
-		else 
-			++black;
-		return this;
-	}
+	Space(Space o) { red=o.red;	black=o.black; edges=o.edges; front=o.front; }
+	Space(int r, int b, int e, int f) { red= r; black= b; edges= e; front= f; }
+	final Space add(Space o) { red+=o.red; black+=o.black; edges+=o.edges; front+=o.front; return this; }
+	final Space add(int xy) { if(Cell.at(xy)==Cell.RED) ++red; else ++black; return this; }
 	final Space add(Cell startcell, int length) {
 		final int half= length>>1;
-		if (startcell==Cell.RED) {
-			red+=length-half;
-			black+=half;
-		} else {
-			black+=length-half;
-			red+=half;
-		}
+		if (startcell==Cell.RED) { red+=length-half; black+=half;
+		} else { black+=length-half; red+=half; }
 		return this;
 	}
 	final int fillable(Cell startcell) {
 		if(red==0 && black==0) return 0;
-		if (startcell==Cell.RED) return 2*(red-1<black?red-1:black)+(black>=red?1:0);
-		else return 2*(red<black-1?red:black-1)+(red>=black?1:0);
+		if (startcell==Cell.RED) 
+		  return 2*((red-1)<black?(red-1):black)+(black>=red?1:0);			  
+	   else  // moves are red-black-red-black-red
+		  return 2*(red<(black-1)?red:(black-1))+(red>=black?1:0);
 	}
 }

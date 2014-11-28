@@ -37,12 +37,12 @@ public class GameUtils {
 	}	
 	
 	static public void store(Game game, PrintWriter out) throws IOException {
-		store(game.grid, game.playersInfo, out);
+		store(game.grid, game.playerAgents, out);
 	}
 
 	
 	@SuppressWarnings("unchecked")
-	static private void store(Grid g, List<PlayerInfo> players, PrintWriter out) throws IOException {
+	static private void store(Grid g, List<PlayerAgent> players, PrintWriter out) throws IOException {
 		
 		JSONObject game= new JSONObject();
 		game.put("version", 1);
@@ -70,7 +70,7 @@ public class GameUtils {
 		for(int p=0; p<g.nbPlayers; ++p) {
 			JSONObject jsonPlayer= new JSONObject();
 			 if(players!=null && players.size()>p) {
-				PlayerInfo player= players.get(p);
+				PlayerAgent player= players.get(p);
 				jsonPlayer.put("name", player.name);
 				jsonPlayer.put("rank", player.rank);
 				jsonPlayer.put("score", player.score);
@@ -105,7 +105,7 @@ public class GameUtils {
 	}
 	
 	@SuppressWarnings("unchecked")
-	static private void storeV0(Grid g, List<PlayerInfo> players, PrintWriter out) throws IOException {
+	static private void storeV0(Grid g, List<PlayerAgent> players, PrintWriter out) throws IOException {
 		
 		JSONObject game= new JSONObject();
 		game.put("nbPlayers", g.nbPlayers);
@@ -115,7 +115,7 @@ public class GameUtils {
 		for(int p=0; p<g.nbPlayers; ++p) {
 			JSONObject jsonPlayer= new JSONObject();
 			if(players!=null && players.size()>p) {
-				PlayerInfo player= players.get(p);
+				PlayerAgent player= players.get(p);
 				jsonPlayer.put("name", player.name);
 				jsonPlayer.put("rank", player.rank);
 				jsonPlayer.put("score", player.score);
@@ -192,11 +192,11 @@ public class GameUtils {
 			g.moves.add((int)p);
 		}
 		g.nbMoves= g.moves.size();
-		List<PlayerInfo> playersInfo= new ArrayList<>(g.nbPlayers);
+		List<PlayerAgent> playersInfo= new ArrayList<>(g.nbPlayers);
 		
 		JSONArray players= (JSONArray)jsonGame.get("players");
 		for(int p=0; p<g.nbPlayers; ++p) {
-			PlayerInfo playerInfo= new PlayerInfo();
+			PlayerAgent playerInfo= new PlayerAgent();
 			JSONObject player= (JSONObject) players.get(p);
 			g.alive[p]= (Boolean) player.get("alive");
 			g.remainingPlayers-=(g.alive[p]?0:1);
@@ -246,7 +246,7 @@ public class GameUtils {
 			g.move(p, Grid.getXY(x+1,y+1));
 		}
 
-		List<PlayerInfo> playersInfo= new ArrayList<>(g.nbPlayers);
+		List<PlayerAgent> playersInfo= new ArrayList<>(g.nbPlayers);
 		JSONArray jsonPlayers= (JSONArray)jsonGame.get("players");
 		for(int p=0; p<g.nbPlayers; ++p) {
 			String name;
@@ -265,11 +265,11 @@ public class GameUtils {
 				name= (String)jsonPlayer.get("name");
 				rank= ((Long)jsonPlayer.get("rank")).intValue();
 				score= ((Double)jsonPlayer.get("score")).floatValue();
-				language= (String)jsonPlayer.get("name");
+				language= (String)jsonPlayer.get("language");
 			}
 			
 
-			PlayerInfo playerInfo= new PlayerInfo();
+			PlayerAgent playerInfo= new PlayerAgent();
 			playerInfo.name= name;
 			playerInfo.rank= rank;
 			playerInfo.score= score;
