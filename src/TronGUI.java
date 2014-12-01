@@ -441,7 +441,7 @@ public class TronGUI {
 						p=nextPlayer;
 						do {
 							g.hideHead(p);
-							g.calculateArticulations(g.head[p]/*, g.territory*/);
+							g.calculateArticulations(g.head[p], g.territory);
 							g.restoreHead(p);
 							p= g.nextPlayer(p);
 						} while(p!=nextPlayer);
