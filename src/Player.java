@@ -265,7 +265,7 @@ final class IA {
 			if(!g.alive[p]) { eval_maxn[p]=0; continue; }
 			ccount= max_articulated_space(g, g.head[p], g.territory);
 			dog.check();
-			eval_maxn[p]= (K1*(ccount.front+ccount.fillable(Cell.at(g.head[p])))+K2*ccount.edges); //ccount.fillable(Cell.at(g.head[p])); //
+			eval_maxn[p]= ccount.fillable(Cell.at(g.head[p])); //K1*ccount.fillable(Cell.at(g.head[p]))+K2*ccount.edges; //
 			total+=eval_maxn[p];
 //			res&= ~(0x7FFFL<<(16*p));
 //			res|= nodecount<<(16*p);
@@ -408,7 +408,7 @@ final class IA {
 	}
 	
 	final static Grid spacefill_tmp= new Grid();
-	final static public int evaluate_alphabeta(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
+	final static public long evaluate_alphabeta(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
 
 		++ab_evals;
 		g.hideHeads();
@@ -420,8 +420,8 @@ final class IA {
 			return evaluate_territory(g, player, opponent, dog);
 		}
 		// 2 players are in separated space ==> Build articulated space for all players
-		int v;
-		int ff0,ff1;
+		long v;
+		long ff0,ff1;
 			
 		g.resetArticulations();
 		g.hideHeads();
@@ -431,10 +431,15 @@ final class IA {
 
 		Space ccount0= max_articulated_space(g, g.head[player]);
 		dog.check();
-		ff0= K1*(ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;
 		Space ccount1= max_articulated_space(g, g.head[opponent]);
 		dog.check();
-		ff1= K1*(ccount1.fillable(Cell.at(g.head[opponent])))+K2*ccount1.edges;
+
+		ff0= ccount0.fillable(Cell.at(g.head[player]));
+		if(ff0<=1) return Move.MIN;
+		ff1=ccount1.fillable(Cell.at(g.head[opponent]));
+		if(ff1<=1) return Move.MAX;
+		ff0= K1*(ff0)+K2*ccount0.edges;
+		ff1= K1*(ff1)+K2*ccount1.edges;
 	
 		v=ff0-ff1;
 		
@@ -456,7 +461,7 @@ final class IA {
 		return v;
 	}
 	
- 	final static int evaluate_territory(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
+ 	final static long evaluate_territory(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
 		g.resetTerritory();
 		g.calculateTerritory(opponent);
 		g.calculateTerritory(player);
@@ -469,10 +474,15 @@ final class IA {
 		// Compute remaining space
 		Space ccount0= max_articulated_space(g, g.head[player], g.territory);
 		dog.check();
-		int nodecount0= K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//ccount0.fillable(Cell.at(g.head[player])); //
 		Space ccount1= max_articulated_space(g, g.head[opponent], g.territory);
 		dog.check();
-		int nodecount1= K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[opponent])))+K2*ccount1.edges; //ccount1.fillable(Cell.at(g.head[opponent])); //
+	
+		long nodecount0= ccount0.fillable(Cell.at(g.head[player]));
+		if(nodecount0<=1) return Move.MIN;
+		nodecount0= K1*nodecount0+K2*ccount0.edges;
+		long nodecount1= ccount1.fillable(Cell.at(g.head[opponent]));
+		if(nodecount1<=1) return Move.MAX;
+		nodecount1= K1*nodecount1+K2*ccount1.edges;
 		return nodecount0-nodecount1;
 	}
 	final static Space max_articulated_space(Grid g, int v) {
@@ -640,7 +650,7 @@ final class IA {
 				if (best.value==spacesleft) break; // we solved it!
 			}
 		}
-		present.value= best.value;
+		present.value= 1+best.value;
 		return best;
 	}
 	final static public int floodfill(final Grid g, final int xy, final Watchdog dog) throws Timeout {
@@ -669,15 +679,14 @@ final class IA {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o1.value==Move.NaN || o2.value==Move.NaN) {
-				if(o2.value==Move.NaN) return -1; // put not eval'd last
-				if(o1.value==Move.NaN) return 1; // put not eval'd last
-			}
+			if(o2.value==Move.NaN) return -1; // put not eval'd last
+			if(o1.value==Move.NaN) return 1; // put not eval'd last
+
 			if(o1.value>o2.value) return -1;
 			if(o1.value<o2.value) return 1;
 			// --> compare depth
 			if(o1.depth>o2.depth) return -1;
-			if(o1.depth>o2.depth) return 1;
+			if(o1.depth<o2.depth) return 1;
 			// --> Compare degree
 			if(o1.degree==-1 && o2.degree==-1) return 0;
 			if(o1.degree==-1) return 1;
@@ -704,11 +713,9 @@ final class IA {
 				if(o1.depth<o2.depth) return -1;
 				if(o1.depth>o2.depth) return 1;
 			}
-
 			// --> Compare degree
-			if(o1.degree==-1 && o2.degree==-1) return 0;
-			if(o1.degree==-1) return 1;
 			if(o2.degree==-1) return -1;
+			if(o1.degree==-1) return 1;
 			if(o1.degree<o2.degree) return -1;  
 			if(o1.degree>o2.degree) return 1;  
 			return 0;
@@ -721,19 +728,21 @@ final class IA {
 			if(o2.value==Move.NaN) return -1; // put null last
 			if(o1.value==Move.NaN) return 1; // put null last
 
-			if(o1.value>o2.value) return 1;
 			if(o1.value<o2.value) return -1;
+			if(o1.value>o2.value) return 1;
 			// --> compare depth
-			if(o1.depth>o2.depth) return -1;
-			if(o1.depth>o2.depth) return 1;
-
-			// o1.value and o2.value are null
+			if(o1.value<=0) {
+				if(o1.depth<o2.depth) return -1;
+				if(o1.depth>o2.depth) return 1;
+			} else {
+				if(o1.depth>o2.depth) return -1;
+				if(o1.depth<o2.depth) return 1;
+			}
 			// --> compare degree
-			if(o1.degree==-1 && o2.degree==-1) return 0;
-			if(o1.degree==-1) return 1;
 			if(o2.degree==-1) return -1;
-			if(o1.degree<o2.degree) return  1;  
+			if(o1.degree==-1) return 1;
 			if(o1.degree>o2.degree) return -1;  
+			if(o1.degree<o2.degree) return  1;  
 			return 0;
 		}
 	};

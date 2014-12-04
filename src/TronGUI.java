@@ -533,7 +533,7 @@ public class TronGUI {
 					Move m= Move.get(selectedMove.move);
 					try {
 						dog.start(0);
-						int value= IA.evaluate_alphabeta(g, g.player, m.opponents.get(0), dog);
+						long value= IA.evaluate_alphabeta(g, g.player, m.opponents.get(0), dog);
 						heuristicField.setText(format(value, Strategy.TERRITORY));
 					} catch (Timeout e1) {
 					}
@@ -541,7 +541,7 @@ public class TronGUI {
 					Grid g= selectedMove.grid;
 					try {
 						dog.start(0);
-						int value= IA.floodfill(g, g.head[g.player], dog);
+						long value= IA.floodfill(g, g.head[g.player], dog);
 						heuristicField.setText(format(value, Strategy.SURVIVAL));
 					} catch (Timeout e1) {
 					}
@@ -722,95 +722,112 @@ public class TronGUI {
 			        		
 			        		con.setDoOutput(true);
 			        		try {
-			        		DataOutputStream wr = new DataOutputStream(con.getOutputStream());
-			        		publish("Connected...");
-			        		wr.writeBytes(postContent);
-			        		wr.flush();
-			        		wr.close();
-			        		publish("Requesting Game "+gameID);
-			        		
-			        		int responseCode = con.getResponseCode();
-//			        		System.out.println("\nSending 'POST' request to URL : " + url);
-//			        		System.out.println("Post content : " + postContent);
-//			        		System.out.println("Response Code : " + responseCode);
-
-			        		if(responseCode!= 200) {
-			        			publish("Unable to retreive game: error "+responseCode);
-			        			return null;
-			        		}
-			        		publish("Downloading Game "+gameID);
-			        		
-			        		BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
-			        		String inputLine;
-			        		StringBuffer response = new StringBuffer();
-			         
-			        		while ((inputLine = in.readLine()) != null) {
-			        			response.append(inputLine);
-			        		}
-			        		in.close();
-			        		
-			        		
-			        		JSONParser parser= new JSONParser();
-			        		JSONObject resp= (JSONObject) parser.parse(response.toString());
-			        		JSONObject success= (JSONObject)resp.get("success");
-			        		success.remove("viewer");
-			        		success.remove("gamebox");
-			        		success.remove("shareable");
-			        		FileWriter writer= new FileWriter(gameID+"-raw.json");
-			        		try {
-			        			success.writeJSONString(writer);
-			        		} finally {
-			        			writer.close();
-			        		}
-			        		JSONArray players= (JSONArray) success.get("playersAgents");
-			        		//		"agentId": 31988,
-			        		//		"candidateId": 307499,
-			        		//		"campaignId": 6933,
-			        		//		"playerName": "Alexandre",
-			        		//		"programmingLanguageId": "Java",
-			        		//		"score": 35.9742537605519,
-			        		//		"creationTime": 1401993065150,
-			        		//		"valid": true,
-			        		//		"questionId": 13083,
-			        		//		"rank": 79,
-			        		//		"gamesPlayed": 100,
-			        		//		"progress": "EQUAL"		
-			        		
-			        		int nbPlayers= players.size();
-			        		
-			        		
-			        		
-			        		JSONObject gameResult= (JSONObject)success.get("gameResult");
-			        		JSONArray positions= (JSONArray)gameResult.get("positions");
-			        		JSONArray infos= (JSONArray)gameResult.get("infos");
-			        		JSONArray views= (JSONArray)gameResult.get("views");
-			        		JSONArray errors= (JSONArray)gameResult.get("errors");
-			        		JSONArray scores= (JSONArray)gameResult.get("scores");
-			        		JSONArray ids= (JSONArray)gameResult.get("ids");
-			        		JSONArray outputs= (JSONArray)gameResult.get("outputs");
-			        		String uinputs= (String) gameResult.get("uinputs");
-			        		
-			        		
-		        			List<PlayerAgent> playersInfo= new ArrayList<PlayerAgent>(players.size());
-		        			
-		        			for(int p=0; p<nbPlayers; ++p) {
-		        				JSONObject playerAgent= (JSONObject) players.get(p);
-		        				PlayerAgent player= new PlayerAgent();
-		        				player.name= (String) playerAgent.get("playerName");
-		        				Object o=playerAgent.get("rank");
-		        				player.rank= o==null?0:((Long)o).intValue();
-		        				o=playerAgent.get("score");
-		        				player.score= o==null?0:((Double) o).floatValue();
-		        				o=playerAgent.get("programmingLanguageId");
-		        				player.language= o==null?"--":o.toString();
-		        				playersInfo.add(player);
-		        			}
-		        			Grid grid= new Grid(nbPlayers);
-		        			for(Object o :views) {
-		        				String entry= (String)o;
-		        				if(entry.startsWith("KEY_FRAME")) processKeyFrame(entry, grid);
-		        			}
-		        			game= new Game(grid, playersInfo);
+				        		DataOutputStream wr = new DataOutputStream(con.getOutputStream());
+				        		publish("Connected...");
+				        		wr.writeBytes(postContent);
+				        		wr.flush();
+				        		wr.close();
+				        		publish("Requesting Game "+gameID);
+				        		
+				        		int responseCode = con.getResponseCode();
+	//			        		System.out.println("\nSending 'POST' request to URL : " + url);
+	//			        		System.out.println("Post content : " + postContent);
+	//			        		System.out.println("Response Code : " + responseCode);
+	
+				        		if(responseCode!= 200) {
+				        			publish("Unable to retreive game: error "+responseCode);
+				        			return null;
+				        		}
+				        		publish("Downloading Game "+gameID);
+				        		
+				        		BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+				        		String inputLine;
+				        		StringBuffer response = new StringBuffer();
+				         
+				        		while ((inputLine = in.readLine()) != null) {
+				        			response.append(inputLine);
+				        		}
+				        		in.close();
+				        		
+				        		
+				        		JSONParser parser= new JSONParser();
+				        		JSONObject resp= (JSONObject) parser.parse(response.toString());
+				        		JSONObject success= (JSONObject)resp.get("success");
+	//			        		success.remove("viewer");
+	//			        		success.remove("gamebox");
+	//			        		success.remove("shareable");
+	//			        		FileWriter writer= new FileWriter(gameID+"-raw.json");
+	//			        		try {
+	//			        			success.writeJSONString(writer);
+	//			        		} finally {
+	//			        			writer.close();
+	//			        		}
+				        		JSONArray players= (JSONArray) success.get("playersAgents");
+				        		//		"agentId": 31988,
+				        		//		"candidateId": 307499,
+				        		//		"campaignId": 6933,
+				        		//		"playerName": "Alexandre",
+				        		//		"programmingLanguageId": "Java",
+				        		//		"score": 35.9742537605519,
+				        		//		"creationTime": 1401993065150,
+				        		//		"valid": true,
+				        		//		"questionId": 13083,
+				        		//		"rank": 79,
+				        		//		"gamesPlayed": 100,
+				        		//		"progress": "EQUAL"		
+				        		
+				        		int nbPlayers= players.size();
+				        		
+				        		
+				        		
+				        		JSONObject gameResult= (JSONObject)success.get("gameResult");
+				        		JSONArray positions= (JSONArray)gameResult.get("positions");
+				        		JSONArray infos= (JSONArray)gameResult.get("infos");
+				        		JSONArray views= (JSONArray)gameResult.get("views");
+				        		JSONArray errors= (JSONArray)gameResult.get("errors");
+				        		JSONArray scores= (JSONArray)gameResult.get("scores");
+				        		JSONArray ids= (JSONArray)gameResult.get("ids");
+				        		JSONArray outputs= (JSONArray)gameResult.get("outputs");
+				        		String uinputs= (String) gameResult.get("uinputs");
+				        		
+				        		
+			        			List<PlayerAgent> playersInfo= new ArrayList<PlayerAgent>(players.size());
+			        			
+			        			for(int p=0; p<nbPlayers; ++p) {
+			        				JSONObject playerAgent= (JSONObject) players.get(p);
+			        				PlayerAgent player= new PlayerAgent();
+			        				player.name= (String) playerAgent.get("playerName");
+			        				Object o=playerAgent.get("rank");
+			        				player.rank= o==null?0:((Long)o).intValue();
+			        				o=playerAgent.get("score");
+			        				player.score= o==null?0:((Double) o).floatValue();
+			        				o=playerAgent.get("programmingLanguageId");
+			        				player.language= o==null?"--":o.toString();
+			        				playersInfo.add(player);
+			        			}
+			        			Grid grid= new Grid(nbPlayers);
+			        			for(Object o :views) {
+			        				String entry= (String)o;
+			        				if(entry.startsWith("KEY_FRAME")) processKeyFrame(entry, grid);
+			        			}
+			        			game= new Game(grid, playersInfo);
+			        			new File("download").mkdirs();
+				        		PrintWriter writer=null;
+				        		try {
+				        			writer= new PrintWriter(new FileWriter("download/"+gameID+".json"));
+				        			success.writeJSONString(writer);
+				        		} catch(IOException ex) {
+				        		} finally {
+				        			if(writer!=null) writer.close();
+				        		}
+				        		writer= null;
+				        		try {
+				        			writer= new PrintWriter(new FileWriter("download/"+gameID+".tron"));
+					        		GameUtils.store(game, writer);
+				        		} catch(IOException ex) {
+				        		} finally {
+				        			if(writer!=null) writer.close(); 
+				        		}
 			        		} catch(IOException ex) {
 			        			publish("Connection failed: "+ex.getMessage());
 			        			game=null;
@@ -918,13 +935,14 @@ public class TronGUI {
 			Comparator<Move> c;
 			switch(m.strategy) { 
 			case TERRITORY:
-				c=(m.depth&1)==0?IA.TERRITORY_MAX:IA.TERRITORY_MIN;
+				c=(m.depth&1)==1?IA.TERRITORY_MAX:IA.TERRITORY_MIN;
 				break;
 			case FIGHT:
 				c= IA.FIGHT_COMPARATOR;
 				break;
 			case SURVIVAL:
 				c= IA.SURVIVAL_COMPARATOR;
+				break;
 			default:
 				c=null;
 			}
