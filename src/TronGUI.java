@@ -11,6 +11,7 @@ import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -103,7 +104,9 @@ public class TronGUI {
 			StringBuffer res= new StringBuffer();
 			for(int p=0; p<4; ++p) {
 				res.insert(0, " ");
-				res.insert(0, Long.toString(eval&0xFFFF));
+				int val= (int)(eval&0xFFFF);
+				if(val==0x7FFF) res.insert(0,"-");
+				else res.insert(0, Long.toString(val));
 				eval=eval>>16;
 			}
 			return res.toString();
@@ -139,8 +142,9 @@ public class TronGUI {
 			if(move==null) return "--";
 			if(move.player==-1) return "--";
 			StringBuffer bf= new StringBuffer();
+			bf.append("P").append(move.player);
 			if(move.dir.step!=0) {
-				bf.append("P").append(move.player).append("-").append(move.dir);
+				bf.append("-").append(move.dir);
 				bf.append(" [ "+(move.value==Move.NaN?"-":TronGUI.format(move.value, move.strategy))+" / "+(move.eval==Move.NaN?"-":TronGUI.format(move.eval,move.strategy))+" ]");
 			}
 			return bf.toString();
@@ -223,6 +227,7 @@ public class TronGUI {
 	private Action gameLastAction= new GameLastAction(">>");
 	private Action gamePlayAction= new GamePlayAction("go");
 	private Action gameResetAction= new GameResetAction("reset");
+	private Action gameEvaluateAction= new GameEvaluateAction("eval");
 	
 	private int gameStateIdx=-1;
 	private boolean gameOver=true;
@@ -230,6 +235,7 @@ public class TronGUI {
 	private Game game;
 
 	private boolean processing=false;
+	private boolean evaluating=false;
 	
 	private ExecutorService executor= Executors.newSingleThreadExecutor(new ThreadFactory() {
 		@Override
@@ -239,7 +245,6 @@ public class TronGUI {
 			return th;
 		}
 	});
-	private JComboBox<Strategy> strategyCombo;
 	private JSpinner depthSpinner;
 	private JSpinner timeoutSpinner;
 	private JToggleButton gamePlayBtn;
@@ -253,6 +258,7 @@ public class TronGUI {
 	private JPanel playersPanel;
 	private JPanel gamePanel;
 	private JMenuItem mntmDownload;
+	private JButton btnEvaluate;
 	/**
 	 * Launch the application.
 	 */
@@ -360,13 +366,14 @@ public class TronGUI {
 		JLabel lblStrategy = new JLabel("Strategy");
 		strategyPanel.add(lblStrategy);
 		
-		strategyCombo = new JComboBox<>();
-		strategyCombo.setEnabled(false);
-		strategyCombo.addItem(Strategy.ADAPTATIVE);
-		strategyCombo.addItem(Strategy.TERRITORY);
-		strategyCombo.addItem(Strategy.SURVIVAL);
-		strategyCombo.setSelectedIndex(0);
-		strategyPanel.add(strategyCombo);
+//		strategyCombo = new JComboBox<>();
+//		strategyCombo.setEnabled(false);
+//		strategyCombo.addItem(Strategy.ADAPTATIVE);
+//		strategyCombo.addItem(Strategy.FIGHT);
+//		strategyCombo.addItem(Strategy.TERRITORY);
+//		strategyCombo.addItem(Strategy.SURVIVAL);
+//		strategyCombo.setSelectedIndex(0);
+//		strategyPanel.add(strategyCombo);
 		
 		JLabel lblDepth = new JLabel("depth");
 		strategyPanel.add(lblDepth);
@@ -381,6 +388,10 @@ public class TronGUI {
 		timeoutSpinner = new JSpinner(new SpinnerNumberModel(0,0,10000,100));
 		timeoutSpinner.setEnabled(false);
 		strategyPanel.add(timeoutSpinner);
+		
+		btnEvaluate = new JButton("evaluate");
+		btnEvaluate.setAction(gameEvaluateAction);
+		strategyPanel.add(btnEvaluate);
 		
 		playersPanel = new JPanel();
 		gamePanel.add(playersPanel, BorderLayout.WEST);
@@ -741,7 +752,17 @@ public class TronGUI {
 			        		
 			        		JSONParser parser= new JSONParser();
 			        		JSONObject resp= (JSONObject) parser.parse(response.toString());
-			        		JSONArray players= (JSONArray) ((JSONObject) resp.get("success")).get("playersAgents");
+			        		JSONObject success= (JSONObject)resp.get("success");
+			        		success.remove("viewer");
+			        		success.remove("gamebox");
+			        		success.remove("shareable");
+			        		FileWriter writer= new FileWriter(gameID+"-raw.json");
+			        		try {
+			        			success.writeJSONString(writer);
+			        		} finally {
+			        			writer.close();
+			        		}
+			        		JSONArray players= (JSONArray) success.get("playersAgents");
 			        		//		"agentId": 31988,
 			        		//		"candidateId": 307499,
 			        		//		"campaignId": 6933,
@@ -759,15 +780,16 @@ public class TronGUI {
 			        		
 			        		
 			        		
-			        		JSONObject gameResult= (JSONObject)((JSONObject) resp.get("success")).get("gameResult");
+			        		JSONObject gameResult= (JSONObject)success.get("gameResult");
 			        		JSONArray positions= (JSONArray)gameResult.get("positions");
-			        		JSONArray infos= (JSONArray)gameResult.get("positions");
+			        		JSONArray infos= (JSONArray)gameResult.get("infos");
 			        		JSONArray views= (JSONArray)gameResult.get("views");
 			        		JSONArray errors= (JSONArray)gameResult.get("errors");
 			        		JSONArray scores= (JSONArray)gameResult.get("scores");
 			        		JSONArray ids= (JSONArray)gameResult.get("ids");
 			        		JSONArray outputs= (JSONArray)gameResult.get("outputs");
 			        		String uinputs= (String) gameResult.get("uinputs");
+			        		
 			        		
 		        			List<PlayerAgent> playersInfo= new ArrayList<PlayerAgent>(players.size());
 		        			
@@ -880,14 +902,14 @@ public class TronGUI {
 		lastPlayerMove= new Move[g.nbPlayers];
 		gameStates.clear();
 		for(int i=0, nb=g.nbMoves-g.nbPlayers; i<nb; ++i) {
-			ExtendedMove m= new ExtendedMove(Move.get(),g.copy());
+			ExtendedMove m= new ExtendedMove(Move.get(g.player),g.copy());
 			gameStates.addFirst(m);
 			g.unmove();
 		}
 		ExtendedMove m= new ExtendedMove(Move.get(),g.copy());
 		gameStates.addFirst(m);
 		gameStateIdx=-1;
-		gameMoveFirst();
+		gameMoveLast();
 	}
 
 	private DefaultMutableTreeNode toNode(Move m, Grid g) {
@@ -896,13 +918,13 @@ public class TronGUI {
 			Comparator<Move> c;
 			switch(m.strategy) { 
 			case TERRITORY:
-				c=(m.depth&1)==1?IA.BEST_TERRITORY_FIRST:IA.BEST_TERRITORY_LAST;
+				c=(m.depth&1)==0?IA.TERRITORY_MAX:IA.TERRITORY_MIN;
 				break;
 			case FIGHT:
-				c= IA.BEST_FIGHT_FIRST;
+				c= IA.FIGHT_COMPARATOR;
 				break;
 			case SURVIVAL:
-				c= IA.BEST_SURVIVAL_FIRST;
+				c= IA.SURVIVAL_COMPARATOR;
 			default:
 				c=null;
 			}
@@ -915,7 +937,7 @@ public class TronGUI {
 	}
 	
 	
-	private void update() {
+	private void updateGUI() {
 		int lastGameStateIdx= gameStates.size()-1;
 		
 		gameFirstAction.setEnabled(!processing && gameStateIdx>0);
@@ -924,12 +946,14 @@ public class TronGUI {
 		gameNextAction.setEnabled(!processing && !(gameOver && gameStateIdx==lastGameStateIdx));
 		gameLastAction.setEnabled(!processing && gameStateIdx<lastGameStateIdx);
 		gamePlayAction.setEnabled(!gameOver && gameStateIdx==lastGameStateIdx);
-		gameResetAction.setEnabled(!processing && gameStateIdx>=0);
+		gameEvaluateAction.setEnabled(!processing && gameStateIdx>=0);
 		moveTree.setEnabled(!processing);
 		
-		strategyCombo.setEnabled(!gameOver && !processing && gameStateIdx==lastGameStateIdx);
-		depthSpinner.setEnabled(!gameOver && !processing && gameStateIdx==lastGameStateIdx);
-		timeoutSpinner.setEnabled(!gameOver && !processing && gameStateIdx==lastGameStateIdx);
+//		strategyCombo.setEnabled(!gameOver && !processing && gameStateIdx==lastGameStateIdx);
+//		depthSpinner.setEnabled(!gameOver && !processing && gameStateIdx==lastGameStateIdx);
+//		timeoutSpinner.setEnabled(!gameOver && !processing && gameStateIdx==lastGameStateIdx);
+		depthSpinner.setEnabled(!processing);
+		timeoutSpinner.setEnabled(!processing);
 	}
 	
 	private void setCurrentGameState(int idx) {
@@ -938,12 +962,12 @@ public class TronGUI {
 		
 		if(idx==gameStates.size()) {
 			processing=true;
-			update();
+			updateGUI();
 			ExtendedMove m= gameStates.getLast();
-			Strategy strategy= (Strategy) strategyCombo.getSelectedItem();
+//			Strategy strategy= (Strategy) strategyCombo.getSelectedItem();
 			int timeout= (Integer) timeoutSpinner.getValue();
 			int depth= (Integer) depthSpinner.getValue();
-			executor.execute(new GameRunner(m, strategy, depth, timeout));
+			executor.execute(new GameRunner(m, depth, timeout));
 			
 		} else {
 			ExtendedMove m= gameStates.get(idx);
@@ -953,7 +977,7 @@ public class TronGUI {
 				gameStateSlider.setMaximum(gameStates.size()-1);
 				gameStateSlider.setValue(idx);
 				
-				if(m.strategy!=null) strategyCombo.setSelectedItem(m.strategy);
+//				if(m.strategy!=null) strategyCombo.setSelectedItem(m.strategy);
 				if(m.depth!=null) depthSpinner.setValue((Integer)m.depth);
 				if(m.timeout!=null) timeoutSpinner.setValue((Integer)m.timeout);
 				
@@ -962,7 +986,7 @@ public class TronGUI {
 				moveTree.setModel(model);
 				moveTree.setSelectionPath(new TreePath(root));
 				gameOver= m.grid.remainingPlayers<=1;
-				update();
+				updateGUI();
 			} else if(processing) {
 				moveTree.setModel(null);
 				boardPanel.setGrid(m.grid);
@@ -986,19 +1010,31 @@ public class TronGUI {
 		setCurrentGameState(gameStates.size()-1);
 	}
 	
+	private void gameEvaluate() {
+		evaluating=true;
+		processing=true;
+		updateGUI();
+
+		ExtendedMove m= gameStates.get(gameStateIdx);
+//		Strategy strategy= (Strategy) strategyCombo.getSelectedItem();
+		int timeout= (Integer) timeoutSpinner.getValue();
+		int depth= (Integer) depthSpinner.getValue();
+		executor.execute(new GameRunner(m, depth, timeout));
+	}
+	
 	private void gameStart() {
 		gamePlayAction.putValue("NAME", "stop");
 		gamePlayAction.putValue(Action.SELECTED_KEY, true);
 		gamePlayAction.putValue(Action.ACTION_COMMAND_KEY, "stop");
 		playing=true;
 		processing=true;
-		update();
+		updateGUI();
 		
 		ExtendedMove m= gameStates.getLast();
-		Strategy strategy= (Strategy) strategyCombo.getSelectedItem();
+//		Strategy strategy= (Strategy) strategyCombo.getSelectedItem();
 		int timeout= (Integer) timeoutSpinner.getValue();
 		int depth= (Integer) depthSpinner.getValue();
-		executor.execute(new GameRunner(m, strategy, depth, timeout));
+		executor.execute(new GameRunner(m, depth, timeout));
 	}
 	
 	private void gameStop() {
@@ -1006,7 +1042,8 @@ public class TronGUI {
 		gamePlayAction.putValue(Action.SELECTED_KEY, false);
 		gamePlayAction.putValue(Action.ACTION_COMMAND_KEY, "start");
 		playing=false;
-		update();
+		evaluating=false;
+		updateGUI();
 	}
 	
 	private void gameReset() {
@@ -1044,6 +1081,15 @@ public class TronGUI {
 		@Override
 		public void actionPerformed(ActionEvent e) {
 			gameMoveNext();
+		}
+	}
+	private class GameEvaluateAction extends GameAction {
+		public GameEvaluateAction(String name) {
+			super(name);
+		}
+		@Override
+		public void actionPerformed(ActionEvent e) {
+			gameEvaluate();
 		}
 	}
 	private class GameLastAction extends GameAction {
@@ -1102,13 +1148,11 @@ public class TronGUI {
 	
 	class GameRunner implements Runnable {
 		private ExtendedMove emove;
-		private Strategy strategy;
 		private int depth;
 		private int timeout;
 		private Watchdog dog= new Watchdog();
-		public GameRunner(ExtendedMove m, Strategy strategy, int depth, int timeout) {
+		public GameRunner(ExtendedMove m, int depth, int timeout) {
 			this.emove = m;
-			this.strategy= strategy;
 			this.depth=depth;
 			this.timeout= timeout;
 		}
@@ -1116,7 +1160,6 @@ public class TronGUI {
 		@Override
 		public void run() {
 			
-			Timer t= new Timer();
 			ExtendedMove current=emove;
 			Move present= emove.move;
 			Move tmp;
@@ -1153,6 +1196,8 @@ public class TronGUI {
 				present.future= lastMove.future;
 				present.strategy= lastMove.strategy;
 				present.depth= lastMove.depth;
+				
+				if(evaluating) break;
 				if(tmp==null) {
 					// Suicide
 					tmp= Move.get(p, Direction.NONE);
@@ -1163,7 +1208,7 @@ public class TronGUI {
 				// Update present
 				present= Move.get(p, tmp.dir);
 				
-				current= new ExtendedMove(present, g, strategy, depth, timeout);
+				current= new ExtendedMove(present, g, Strategy.ADAPTATIVE, depth, timeout);
 				gameStates.add(current);
 				if(playing) {
 					EventQueue.invokeLater(new Runnable() {
@@ -1182,8 +1227,14 @@ public class TronGUI {
 			EventQueue.invokeLater(new Runnable() {
 				public void run() {
 					processing=false;
-					gameStop();
-					gameMoveLast();
+					if(evaluating) {
+						int idx= gameStateIdx;
+						gameStateIdx=-1;
+						setCurrentGameState(idx);
+					} else {
+						gameStop();
+						gameMoveLast();
+					}
 				}
 			});
 		}
