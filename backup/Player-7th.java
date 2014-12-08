@@ -3,14 +3,14 @@ import java.io.*;
 final class Player {
 	public static final int TIMEOUT=85;
 	public static final int DEPTH=100;
-	static final int DEBUG=1;
 	final Scanner in;
     final PrintStream out;
 	final PrintStream log;
     Move present=null;
     final Grid grid= new Grid();
     final Grid tmp= new Grid();
-    final Watchdog dog=new Watchdog();
+	final Timer timer= new Timer();
+    Watchdog dog;
     static public void main(String[] args) {
     	new Player().play();
     }
@@ -27,16 +27,16 @@ final class Player {
         int N = in.nextInt(); // total number of players (2 to 4).
         int P = in.nextInt(); // your player number (0 to 3).
         in.nextLine();
-  		dog.start(TIMEOUT);
         grid.setNbPlayers(N);
         int[] XY0= new int[N];
         int[] XY1= new int[N];
         boolean[] alive= new boolean[] { 0<N, 1<N, 2<N, 3<N };
         boolean firstRound=true;
-        Direction[] round= new Direction[] { Direction.NONE, Direction.NONE, Direction.NONE, Direction.NONE };
+        Move current;
         int p;
         while (true) {
         	System.arraycopy(XY1, 0, XY0, 0, N);
+        	current= Move.get(0);
             for (int i = 0; i < N; i++) {
                 final int X0 = in.nextInt()+1; // starting X coordinate of lightcycle (or 0)
                 final int Y0 = in.nextInt()+1; // starting Y coordinate of lightcycle (or 0)
@@ -50,46 +50,47 @@ final class Player {
                 }
                 if(X0==0 && alive[p]) { // Suicide player
                 	grid.move(p,0);
+                	continue;
                 }
 	            XY1[p]= Grid.getXY(X1, Y1);
 	            Direction d= Direction.fromTo(XY0[p], XY1[p]);
-	            round[p]= d;
+	            if(d!=Direction.NONE) current.append(p, d);
             }
         	firstRound=false;
+    		dog= new Watchdog();
+      		timer.schedule(dog, TIMEOUT);
       		// Apply move
-      		for(p=0; p<N; ++p) if(round[p]!=Direction.NONE) grid.move(p, round[p]);
-//      		if(present!=null && Arrays.equals(alive, grid.alive)) {
-//      			// No player died
-//      			Move evaluated=null;
-//      			switch(present.strategy){ 
-//      			case TERRITORY:
-//	      			// Try to find if we've already evaluated this position
-//	      			for(Iterator<Move> it= present.future.iterator(); it.hasNext(); ) {
-//	      				Move f= it.next();
-//	      				if(!f.match(current)) continue;
-//	      				evaluated=f;
-//	      				it.remove();
-//	      				break;
-//	      			}
-//	      			break;
-//      			case SURVIVAL:
-//      				evaluated=present;
-//      				present=null;
-//      				break;
-//      			}
-//      			if(evaluated!=null) {
-//      				current.dispose(false);
-//      				current=evaluated;
-//      			}
-//      		} 
+      		current.move(grid);
+      		if(present!=null && Arrays.equals(alive, grid.alive)) {
+      			// No player died
+      			Move evaluated=null;
+      			switch(present.strategy){ 
+      			case TERRITORY:
+	      			// Try to find if we've already evaluated this position
+	      			for(Iterator<Move> it= present.future.iterator(); it.hasNext(); ) {
+	      				Move f= it.next();
+	      				if(!f.match(current)) continue;
+	      				evaluated=f;
+	      				it.remove();
+	      				break;
+	      			}
+	      			break;
+      			case SURVIVAL:
+      				evaluated=present;
+      				present=null;
+      				break;
+      			}
+      			if(evaluated!=null) {
+      				current.dispose(false);
+      				current=evaluated;
+      			}
+      		} 
   			if(present!=null) present.dispose(false);
-//  			present=current;
-  			present= Move.get();
+  			present=current;
         	tmp.copy(grid);
         	Move best= IA.nextMove(present, tmp, 0, DEPTH, dog);
         	if(best!=null) {
-        		log.println(best.strategy+" "+IA.maxitr);
-	   			out.println(best.dir); 
+	   			out.println(best.dir[0]); 
 	        	out.flush();	
         	} else {
     			out.println("Your father was the Creator, Sam! Make it there alive and he'll find you...");
@@ -97,6 +98,7 @@ final class Player {
     			break;
         	}
     		// Do some house cleaning
+    		dog.cancel();
 			present.future.remove(best);
     		present.dispose();
 			present=best;
@@ -105,20 +107,8 @@ final class Player {
 	        in.nextInt(); // total number of players (2 to 4).
 	        in.nextInt(); // your player number (0 to 3).
 	        in.nextLine();
-	  		dog.start(TIMEOUT);
 		}
 	}
-}
-final class ListInt {
-	final int[] buffer; int first,last;
-	ListInt(int size) { buffer= new int[size]; first=last=0; }
-	void add(int v) { buffer[last++]=v;	}
-	int remove() { return buffer[first++]; }
-	int get(int idx) { return buffer[first+idx]; }
-	void set(int idx, int val) { buffer[first+idx]=val; }
-	int size() { return last-first; }
-	boolean isEmpty() { return first==last; }
-	void clear() { first=last=0; }
 }
 final class IA {
 	// Entry point
@@ -127,12 +117,6 @@ final class IA {
 		grid.hideHeads();
 		grid.calculateComponents(true);
 		grid.restoreHeads();
-		
-//		grid.resetTerritory();
-//		grid.calculateTerritory(forPlayer);
-//		for(int p=grid.nextPlayer(forPlayer); p!=forPlayer; p=grid.nextPlayer(p)) {
-//			grid.calculateTerritory(p);
-//		}
 		
 		int cp= grid.playerComponent(forPlayer);
 
@@ -150,7 +134,6 @@ final class IA {
 		}
 		return m;
 	}
-	public static int maxitr=0;
 	// Fight Strategy
 	public static int maxn_runs;
 	public static int maxn_evals;
@@ -158,8 +141,9 @@ final class IA {
 	public static int ab_runs;
 	public static int ab_evals;
 	public static int ab_cutoffs;
-	static final int K1= 55;
-	static final int K2= 194;
+	static final int K1= 5; //55;
+	static final int K2= 19; //194;
+	public static int maxitr=0;
 	final static public Move nextMoveFight(Move present, final Grid grid, final int forPlayer, final LinkedList<Integer> opponents, final int maxDepth, final Watchdog dog) {
 		// original grid must have been copied before calling this method as it will be messed up during processing
 		boolean dirty=present.strategy!=Strategy.FIGHT;
@@ -179,11 +163,11 @@ final class IA {
 		try {
 			for (itr= 0; itr<maxDepth; itr++) {
 				Move m= maxn(present, forPlayer, opponents, grid, itr*opponents.size(), dog);
+				maxitr= (itr*opponents.size())+1;
 //				if(best!=null) best.dispose(false);
 //				best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
 				best= m;  // Use best as is. It may be modified by next itr search, but sorting should take care of that
-//				present.depth=(itr*opponents.size())+1;		
-				maxitr= itr+1;
+				present.depth=maxitr;		
 				dog.check();
 			}
 		} catch (Timeout t) {
@@ -225,7 +209,7 @@ final class IA {
 			maxn(m, forPlayer, players, g, itr-1, dog);
 			m.unmove(g);
 			dog.check();
-			if(best==null || FIGHT_COMPARATOR.compare(m, best)<0) {
+			if(best==null || BEST_FIGHT_FIRST.compare(m, best)<0) {
 				best= m;
 			}
 		}
@@ -235,49 +219,47 @@ final class IA {
 		present.opponents=players;
 		return best;
 	}
-	final static long[] eval_maxn= new long[4];
- 	final static long evaluate_maxn(final Grid g, final int player, final List<Integer> players, final Watchdog dog) throws Timeout {
+ 	final static long evaluate_maxn(final Grid g, final int player, final List<Integer> opponents, final Watchdog dog) throws Timeout {
  		++maxn_evals;
- 		eval_maxn[0]=eval_maxn[1]=eval_maxn[2]=eval_maxn[3]=0x7FFF;
- 		g.resetTerritory();
+		g.resetTerritory();
 		int p;
-		for(int t=1; t<players.size(); ++t) {
-			p=players.get(t);
+		for(int t=1; t<opponents.size(); ++t) {
+			p=opponents.get(t);
 			if(g.alive[p])g.calculateTerritory(p);
 		}
 		if(g.alive[player])g.calculateTerritory(player);
 		// Build articulations for all player in our component
 		g.resetArticulations();
-		for(int t=0; t<players.size(); ++t) {
-			p=players.get(t);
+		for(int t=1; t<opponents.size(); ++t) {
+			p=opponents.get(t);
 			if(!g.alive[p]) continue;
 			g.hideHead(p);
 			g.calculateArticulations(g.head[p], g.territory);
 			g.restoreHead(p);
 		}
+		if(g.alive[player]) {
+			g.hideHead(player);
+			g.calculateArticulations(g.head[player], g.territory);
+			g.restoreHead(player);
+		}
 		// Compute remaining space
 		long res=0;
 		Space ccount;
-//		long total=0;
-		for(int t=0; t<players.size(); ++t) {
-			p=players.get(t);
-			if(!g.alive[p]) { eval_maxn[p]=0; continue; }
+		long nodecount;
+		for(int t=0; t<opponents.size(); ++t) {
+			p=opponents.get(t);
+			if(!g.alive[p]) continue;
 			ccount= max_articulated_space(g, g.head[p], g.territory);
 			dog.check();
-			eval_maxn[p]= ccount.fillable(Cell.at(g.head[p])); //K1*ccount.fillable(Cell.at(g.head[p]))+K2*ccount.edges; //
-//			total+=eval_maxn[p];
+			nodecount= K1*(ccount.front+ccount.fillable(Cell.at(g.head[p])))+K2*ccount.edges; //ccount.fillable(Cell.at(g.head[p])); //
+			res|= nodecount<<(16*p);
 		}
-
-		// RATIO
-//		res= (eval_maxn[0]==0x7FFFL?0x7FFFL:total==0L?0L:(10000L*eval_maxn[0]/total)) | 
-//			     (eval_maxn[1]==0x7FFFL?0x7FFF0000L:total==0L?0L:(10000L*eval_maxn[1]/total)<<16) |
-//				 (eval_maxn[2]==0x7FFFL?0x7FFF00000000L:total==0L?0L:(10000L*eval_maxn[2]/total)<<32) |
-//				 (eval_maxn[3]==0x7FFFL?0x7FFF000000000000L:total==0L?0L:(10000L*eval_maxn[3]/total)<<48);
-		// ABSOLUTE
-		res= (eval_maxn[0]==0x7FFFL?0x7FFFL:(eval_maxn[0])) | 
-			     (eval_maxn[1]==0x7FFFL?0x7FFF0000L:(eval_maxn[1]<<16)) |
-				 (eval_maxn[2]==0x7FFFL?0x7FFF00000000L:(eval_maxn[2]<<32)) |
-				 (eval_maxn[3]==0x7FFFL?0x7FFF000000000000L:(eval_maxn[3]<<48));
+//		if(g.alive[player]) {
+//			ccount= max_articulated_space(g, g.head[player], g.territory);
+//			dog.check();
+//			nodecount= K1*(ccount.front+ccount.fillable(Cell.at(g.head[player])))+K2*ccount.edges;//ccount.fillable(Cell.at(g.head[player])); //
+//			res|= nodecount<<(16*player);
+//		}
 		return res;
 	}
 	final static public Move nextMoveTerritory(Move present, final Grid grid, final int forPlayer, final List<Integer> opponents, final int maxDepth, final Watchdog dog) {
@@ -297,16 +279,14 @@ final class IA {
 		ab_cutoffs= 0;
 		try {
 			for (itr= 1; itr<=maxDepth; itr++) {
-				Move m= alphabeta(grid, forPlayer, opponents, Move.MIN, Move.MAX, 0, (2*itr)-1, present, dog);
-				maxitr= itr;
-				if (m==null) {
+				Move m= alphabeta(grid, forPlayer, opponents, Move.MIN, Move.MAX, (2*itr)-1, present, dog);
+				maxitr= 2*itr-1;
+				best= m;  // Use best as is. It may be modified by next itr search, but sorting should take care of that
+				if (present.value==Move.MIN) {
 					// deeper searching is apparently impossible (either because
 					// there are no more moves for us
 					break;
 				}
-//				if(best!=null) best.dispose(false);
-//				best= Move.get(m);
-				best= m;  // Use best as is. It may be modified by next itr search, but sorting should take care of that
 				if (best!=null) {
 					if (present.value==Move.MAX) {
 						// our opponent cannot move, so we win
@@ -317,30 +297,29 @@ final class IA {
 			}
 		} catch (Timeout t) {
 		}
-//		present.maxDepth=maxitr;		
+		present.depth=maxitr;		
 		present.opponents= opponents;
 		return best;
 	}
 	// do an iterative-deepening search on all moves and see if we can find a move sequence that cuts off our opponent
-	final static Move alphabeta(final Grid g, final int forPlayer, final List<Integer> opponents, long a, long b, int depth, int maxDepth, final Move present, final Watchdog dog) throws Timeout {
+	final static Move alphabeta(final Grid g, final int forPlayer, final List<Integer> opponents, long a, long b, int itr, final Move present, final Watchdog dog) throws Timeout {
 		final int opponent=opponents.get(0);
 		dog.check();
 		++ab_runs;
-		present.strategy= Strategy.TERRITORY;
-		present.maxDepth=maxDepth;
-		present.opponents=opponents;
 		// last iteration?
-		if (depth==maxDepth) {
+		if (itr==0) {
 			// We're evaluating present if not already done !!
 			if (present.eval==Move.NaN) {
 				present.degree= g.degree(g.head[forPlayer]);
 				present.eval= evaluate_alphabeta(g, forPlayer, opponent, dog);
 			}
 			present.value= present.eval;
-			present.depth= depth;
+			present.strategy= Strategy.TERRITORY;
+			present.depth=itr;
+			present.opponents=opponents;
 			return null;
 		}
-		boolean maximize=(depth&1)==0;
+		boolean maximize=(itr&1)==1;
 		if (present.future.isEmpty()) {
 			// No future yet. build it
 			if(maximize) {
@@ -353,7 +332,9 @@ final class IA {
 					// NO FUTURE FOR MAX PLAYER !!!
 					present.eval=Move.MIN;
 					present.value=Move.MIN;
-					present.depth=depth;
+					present.strategy= Strategy.TERRITORY;
+					present.depth=itr;
+					present.opponents=opponents;
 					return null;
 				}
 			} else {
@@ -366,24 +347,26 @@ final class IA {
 					// NO FUTURE FOR ONE OPPONENT !!!
 					present.eval=Move.MAX;
 					present.value=Move.MAX;
-					present.depth=depth;
+					present.strategy= Strategy.TERRITORY;
+					present.depth=itr;
+					present.opponents=opponents;
 					return null;
 				}
 			}
 		}
 		// Sort Future
-		Collections.sort(present.future, maximize?TERRITORY_MAX:TERRITORY_MIN);
+		Collections.sort(present.future, maximize?BEST_TERRITORY_FIRST:BEST_TERRITORY_LAST);
 		Move minimax=null;
 		long  minimaxv= maximize?Move.MIN:Move.MAX;
 		
 		for (Move m : present.future) {
 			// move player
 			m.move(g);
-			alphabeta(g, forPlayer, opponents, a, b, depth+1,maxDepth, m, dog);
+			alphabeta(g, forPlayer, opponents, a, b, itr-1, m, dog);
 			m.unmove(g);
 			dog.check();
 			if(maximize) { // Maximizing 
-				if(minimax==null || TERRITORY_MAX.compare(minimax, m)>0) {
+				if(minimax==null || BEST_TERRITORY_FIRST.compare(minimax, m)>0) {
 					minimax= m;
 					minimaxv=minimax.value;
 				}
@@ -394,7 +377,7 @@ final class IA {
 				}
 				a= a>minimaxv?a:minimaxv;
 			} else { // Minimizing
-				if(minimax==null || TERRITORY_MIN.compare(minimax, m)>0) {
+				if(minimax==null || BEST_TERRITORY_LAST.compare(minimax, m)>0) {
 					minimax=m;
 					minimaxv= m.value;
 				}
@@ -407,12 +390,14 @@ final class IA {
 			}
 		}
 		present.value= minimaxv;
-		present.depth=minimax.depth;
+		present.strategy= Strategy.TERRITORY;
+		present.depth=itr;
+		present.opponents=opponents;
 		return minimax;
 	}
 	
 	final static Grid spacefill_tmp= new Grid();
-	final static public long evaluate_alphabeta(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
+	final static public int evaluate_alphabeta(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
 
 		++ab_evals;
 		g.hideHeads();
@@ -424,8 +409,8 @@ final class IA {
 			return evaluate_territory(g, player, opponent, dog);
 		}
 		// 2 players are in separated space ==> Build articulated space for all players
-		long v;
-		long ff0,ff1;
+		int v;
+		int ff0,ff1;
 			
 		g.resetArticulations();
 		g.hideHeads();
@@ -434,59 +419,45 @@ final class IA {
 		g.restoreHeads();
 
 		Space ccount0= max_articulated_space(g, g.head[player]);
-		dog.check();
-		Space ccount1= max_articulated_space(g, g.head[opponent]);
-		dog.check();
-
 		ff0= ccount0.fillable(Cell.at(g.head[player]));
-		if(ff0<=1) return Move.MIN;
-		ff1=ccount1.fillable(Cell.at(g.head[opponent]));
-		if(ff1<=1) return Move.MAX;
-		ff0= K1*(ff0)+K2*ccount0.edges;
-		ff1= K1*(ff1)+K2*ccount1.edges;
-	
-		v=ff0-ff1;
-		
-//		v= 10000*(ff0-ff1);
-//		// if our estimate is really close, try some searching
-//		if (v!=0&&Math.abs(v)<=30000) {
-//			Move present= Move.get();
-//			spacefill_tmp.copy(g, false);
-//			spacefill(present, spacefill_tmp, player, 3, dog);
-//			ff0= (int)present.value;
-//			dog.check();
-//			present.reset();
-//			spacefill_tmp.copy(g,false);
-//			spacefill(present, spacefill_tmp, opponent, 3, dog);
-//			ff1= (int)present.value;
-//			v= 10000*(ff0-ff1);
-//			present.dispose(false);
-//		}
+		Space ccountp= max_articulated_space(g, g.head[opponent]);
+		ff1= ccountp.fillable(Cell.at(g.head[opponent]));
+		dog.check();
+		v= 10000*(ff0-ff1);
+		// if our estimate is really close, try some searching
+		if (v!=0&&Math.abs(v)<=30000) {
+			Move present= Move.get();
+			spacefill_tmp.copy(g, false);
+			spacefill(present, spacefill_tmp, player, 3, dog);
+			ff0= (int)present.value;
+			dog.check();
+			present.reset();
+			spacefill_tmp.copy(g,false);
+			spacefill(present, spacefill_tmp, opponent, 3, dog);
+			ff1= (int)present.value;
+			v= 10000*(ff0-ff1);
+			present.dispose(false);
+		}
 		return v;
 	}
 	
- 	final static long evaluate_territory(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
+ 	final static int evaluate_territory(final Grid g, final int player, final int opponent, final Watchdog dog) throws Timeout {
 		g.resetTerritory();
 		g.calculateTerritory(opponent);
 		g.calculateTerritory(player);
 		// Build articulations for all player in our component
 		g.resetArticulations();
 		g.hideHeads();
-		g.calculateArticulations(g.head[opponent], g.territory);
-		g.calculateArticulations(g.head[player], g.territory);
+		g.calculateArticulations(g.head[opponent]/*, g.territory*/);
+		g.calculateArticulations(g.head[player]/*, g.territory*/);
 		g.restoreHeads();
 		// Compute remaining space
 		Space ccount0= max_articulated_space(g, g.head[player], g.territory);
 		dog.check();
+		int nodecount0= K1*(ccount0.front+ccount0.fillable(Cell.at(g.head[player])))+K2*ccount0.edges;//ccount0.fillable(Cell.at(g.head[player])); //
 		Space ccount1= max_articulated_space(g, g.head[opponent], g.territory);
 		dog.check();
-	
-		long nodecount0= ccount0.fillable(Cell.at(g.head[player]));
-		if(nodecount0<=1) return Move.MIN;
-		nodecount0= K1*nodecount0+K2*ccount0.edges;
-		long nodecount1= ccount1.fillable(Cell.at(g.head[opponent]));
-		if(nodecount1<=1) return Move.MAX;
-		nodecount1= K1*nodecount1+K2*ccount1.edges;
+		int nodecount1= K1*(ccount1.front+ccount1.fillable(Cell.at(g.head[opponent])))+K2*ccount1.edges; //ccount1.fillable(Cell.at(g.head[opponent])); //
 		return nodecount0-nodecount1;
 	}
 	final static Space max_articulated_space(Grid g, int v) {
@@ -527,23 +498,64 @@ final class IA {
 				}
 			}
 		}
+		//System.out.println("maxSpace"+Grid.toXYString(xy)+"="+maxspace);
 		return maxspace;
 	}
-	static private ListInt current= new ListInt(1024);
-	static private ListInt next= new ListInt(1024);
+	final static void explore_space(final Space result, final Grid g, final List<Integer> exits, final int v, final int[] territory, final int pID) {
+		if ((g.num[v]&pID)==pID) return; // redundant; already explored
+		if (Cell.at(v)==Cell.RED) ++result.red;
+		else ++result.black;
+		g.num[v]|= pID; // mark with pID
+		if (g.articd[v]!=0) {
+			// we're an articulation vertex; nothing to do but populate the exits
+			for (Direction d : Direction.ALL) {
+				int w= v+d.step;
+				if (g.grid[w]!=0) continue;
+				++result.edges;
+				if (territory!=null&&(territory[w]&pID)!=pID) {
+					result.front=1;
+					continue;
+				}
+				if ((g.num[w]&pID)==pID) continue; // use 'num' from articulation vertex pass to mark nodes used
+				if(!exits.contains(w))	exits.add(w);
+			}
+		} else {
+			// this is a non-articulation vertex
+			for (Direction d : Direction.ALL) {
+				int w= v+d.step;
+				if (g.grid[w]!=0) continue;
+				++result.edges;
+				// filter out nodes not in our territory region
+				if (territory!=null&&(territory[w]&pID)!=pID) {
+					result.front=1;
+					continue;
+				}
+				if ((g.num[w]&pID)==pID) continue; // use 'num' from articulation vertex pass to mark nodes used
+				if (g.articd[w]!=0) { // is this vertex articulated? thenadd it as an exit and don't traverse it yet
+					if(!exits.contains(w))	exits.add(w);
+				} else {
+					Space s= new Space();
+					explore_space(s, g, exits, w, territory, pID);
+					result.add(s);
+				}
+			}
+		}
+	}
+	static private ArrayDeque<Integer> current= new ArrayDeque<Integer>(40);
+	static private ArrayDeque<Integer> next= new ArrayDeque<Integer>(40);
+	static private ArrayDeque<Integer> tmp;
 	final static Space exploreSpace(final Grid g, int xy, final List<Integer> exits, final short[] territory, final short pID) {
-		ListInt swap;
 		// Rework pID marking
 		Space s= new Space();
 		current.clear();
 		next.clear();
 		next.add(xy);
 		do {
-			swap= current;
+			tmp= current;
 			current=next;
-			next=swap;
+			next=tmp;
 			while(!current.isEmpty()) {
-				xy=current.remove();
+				xy=current.poll();
 				if((g.num[xy]&pID)==pID) continue;
 				s.add(xy);	       // Add cell
 				g.num[xy]|=pID;    // Mark processed;
@@ -594,44 +606,50 @@ final class IA {
 			present.player= player;
 			present.strategy= Strategy.SURVIVAL;
 		}
+		int maxitr=0;
 		Move best= null;
 		try {
 		for (itr= 1; itr<=maxDepth; itr++) {
-			if (dog.timeout()) break;
-			if(area < itr) 	break; // Useless to search deeper"
+			if (dog.panic) break;
 			Move m= spacefill(present, grid, player, itr, dog);
+			maxitr= itr;
 			if(m==null) continue;
-			maxitr=itr;
-			if (best==null || SURVIVAL_COMPARATOR.compare(m,best)<0) {
-//				if(best!=null) best.dispose(false);
-//				best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
-				best=m;
-				if (best.value>=area) break; // solved!
+			if (best==null || BEST_SURVIVAL_FIRST.compare(m,best)<0) {
+				if(best!=null) best.dispose(false);
+				best= Move.get(m);  // Deep copy of best eval so far TODO is it a good idea ???
+			}
+			if (best.value<=itr) {
+				break; // we can't possibly search any deeper TODO ???
+			}
+			if (best.value>=area) {
+				break; // solved!
 			}
 		}
 		} catch(Timeout t) {
 		}
+		present.depth=maxitr;
 		return best;
 	}
 	final static Move spacefill(final Move present, final Grid g, final int player, final int itr, final Watchdog dog) throws Timeout {
 		dog.check();
 		final int head= g.head[player];
-		final int degree=g.degree(head); 
-		present.strategy=Strategy.SURVIVAL;
-		present.depth=itr;
+		int degree=g.degree(head); 
 		if (degree==0) {
-			present.eval= 1;
-			present.value= 1;
-			present.degree=0;
+			present.eval= 0;
+			present.value= 0;
+			present.strategy=Strategy.SURVIVAL;
+			present.depth=itr;
 			return null;
 		}
 		if (itr==0) {
 			// We're evaluating present
 			if(present.eval==Move.NaN) {
 				present.degree= degree;
-				present.eval= 1+floodfill(g, head, dog);
+				present.eval= floodfill(g, head, dog);
 			}
+			present.depth=itr;
 			present.value=present.eval;
+			present.strategy=Strategy.SURVIVAL;
 			return null;
 		}
 		if (present.future.size()==0) {
@@ -641,56 +659,58 @@ final class IA {
 				present.future.add(Move.get(player, d));
 			}
 		}
-		Collections.sort(present.future, SURVIVAL_COMPARATOR);		
+		Collections.sort(present.future, BEST_SURVIVAL_FIRST);		
 		int spacesleft= g.fillableAreaAt(head);
-		Move best= null;
+		Move bestf= null;
 		for (Move f : present.future) {
-			dog.check();
 			f.move(g);
 			spacefill(f, g, player, itr-1, dog);
 			f.unmove(g);
-			if (best==null || SURVIVAL_COMPARATOR.compare(f, best)<0) {
-				best= f;
-				if (best.value==spacesleft) break; // we solved it!
+			if (bestf==null || BEST_SURVIVAL_FIRST.compare(f, bestf)<0) {
+				bestf= f;
 			}
+			if (bestf.value==spacesleft) break; // we solved it!
+			dog.check();
 		}
-		present.value= 1+best.value;
-		return best;
+		assert(bestf!=null);
+		present.value= (bestf==null?0:bestf.value);
+		present.depth=itr;
+		return bestf;
 	}
 	final static public int floodfill(final Grid g, final int xy, final Watchdog dog) throws Timeout {
 		// flood fill heuristic: choose to remove as few edges from the graph as
 		// possible (in other words, move onto the square with the lowest degree)
 		dog.check();		
-		int bestv= -1;
-		int best= xy;
+		int bestv= 0;
+		int b= xy;
 		for (Direction d : Direction.ALL) {
 			int xyd= xy+d.step;
 			if (g.grid[xyd]!=0) continue;
 			int v= g.connectedValueAt(xyd)+g.fillableAreaAt(xyd)-2*g.degree(xyd)-4*g.isArticulation(xyd);
 			if (v>bestv) {
 				bestv= v;
-				best= xyd;
+				b= xyd;
 			}
 		}
-		if (bestv<0) return 0;
+		if (bestv==0) return 0;
 		int a;
-		g.grid[best]= 1; g.removeFromComponents(best);
-		a= 1+floodfill(g, best, dog);
-		g.grid[best]= 0; g.addToComponents(best);
+		g.grid[b]= 1; g.removeFromComponents(b);
+		a= 1+floodfill(g, b, dog);
+		g.grid[b]= 0; g.addToComponents(b);
 		return a;
 	}	
-	static final public Comparator<Move> SURVIVAL_COMPARATOR= new Comparator<Move>()  {
+	static final public Comparator<Move> BEST_SURVIVAL_FIRST= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o2.value==Move.NaN) return -1; // put not eval'd last
-			if(o1.value==Move.NaN) return 1; // put not eval'd last
-
-			if(o1.value>o2.value) return -1;
-			if(o1.value<o2.value) return 1;
-			// --> compare depth
-			if(o1.depth>o2.depth) return -1;
-			if(o1.depth<o2.depth) return 1;
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return -1;
+				if(o1.value<o2.value) return 1;
+			}
 			// --> Compare degree
 			if(o1.degree==-1 && o2.degree==-1) return 0;
 			if(o1.degree==-1) return 1;
@@ -700,110 +720,140 @@ final class IA {
 			return 0;
 		}
 	};	
-	static final public Comparator<Move> TERRITORY_MAX= new Comparator<Move>()  {
+	static final public Comparator<Move> BEST_TERRITORY_FIRST= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o2.value==Move.NaN) return -1; // put not eval'd last
-			if(o1.value==Move.NaN) return 1; // put not eval'd last
-
-			if(o1.value>o2.value) return -1;
-			if(o1.value<o2.value) return 1;
-			// --> compare depth
-			if(o1.value<=0) {
-				if(o1.depth>o2.depth) return -1;
-				if(o1.depth<o2.depth) return 1;
-			} else {
-				if(o1.depth<o2.depth) return -1;
-				if(o1.depth>o2.depth) return 1;
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return -1;
+				if(o1.value<o2.value) return 1;
 			}
 			// --> Compare degree
-			if(o2.degree==-1) return -1;
+			if(o1.degree==-1 && o2.degree==-1) return 0;
 			if(o1.degree==-1) return 1;
+			if(o2.degree==-1) return -1;
 			if(o1.degree<o2.degree) return -1;  
 			if(o1.degree>o2.degree) return 1;  
 			return 0;
 		}
 	};
-	static final public Comparator<Move> TERRITORY_MIN= new Comparator<Move>()  {
+	static final public Comparator<Move> BEST_TERRITORY_LAST= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o2.value==Move.NaN) return -1; // put null last
-			if(o1.value==Move.NaN) return 1; // put null last
-
-			if(o1.value<o2.value) return -1;
-			if(o1.value>o2.value) return 1;
-			// --> compare depth
-			if(o1.value<=0) {
-				if(o1.depth<o2.depth) return -1;
-				if(o1.depth>o2.depth) return 1;
-			} else {
-				if(o1.depth>o2.depth) return -1;
-				if(o1.depth<o2.depth) return 1;
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put null last
+				if(o2.value==Move.NaN) return -1; // put null last
 			}
+			if(o1.value!=Move.NaN && o2.value!=Move.NaN) {
+				if(o1.value>o2.value) return 1;
+				if(o1.value<o2.value) return -1;
+			}
+			// o1.value and o2.value are null
 			// --> compare degree
-			if(o2.degree==-1) return -1;
+			if(o1.degree==-1 && o2.degree==-1) return 0;
 			if(o1.degree==-1) return 1;
-			if(o1.degree>o2.degree) return -1;  
+			if(o2.degree==-1) return -1;
 			if(o1.degree<o2.degree) return  1;  
+			if(o1.degree>o2.degree) return -1;  
 			return 0;
 		}
 	};
-	static final public Comparator<Move> FIGHT_MAX_ME= new Comparator<Move>()  {
+	static final public Comparator<Move> BEST_FIGHT_MAX_ME= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o2.value==Move.NaN) return -1; // put not eval'd last
-			if(o1.value==Move.NaN) return 1; // put not eval'd last
-
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}			
 			long v1= (o1.value>>(16*o1.player))&0xFFFF;
 			long v2= (o2.value>>(16*o2.player))&0xFFFF;	
 			
 			if(v1>v2) return -1;
 			if(v1<v2) return 1;
 
+			v1=v2=0;
+			for(int p=0; p<4; ++p) {
+				v1+= ((o1.value>>(16*p))&0xFFFF);
+				v2+= ((o2.value>>(16*p))&0xFFFF);
+			}
+			if(v1<v2) return -1;
+			if(v1>v2) return 1;
+			
+//			long min1=Long.MAX_VALUE;
+//			long min2=Long.MAX_VALUE;
+//			for(int p=0; p<4; ++p) {
+//				if(p==o1.player) continue;  // ignore our value
+//				v1= (o1.value>>(16*p))&0xFFFF;
+//				if(v1==0) continue;   // ignore non eval'd players ==> TODO Change this value to -1 / 0xFFFF
+//				if(min1>v1) min1=v1;
+//				
+//				v2= (o2.value>>(16*p))&0xFFFF;
+//				if(min2>v2) min2=v2;
+//			}
+//			if(min1<min2) return -1;
+//			if(min1>min2) return 1;
+			long m1=Long.MIN_VALUE;
+			long m2=Long.MIN_VALUE;
+			for(int p=0; p<4; ++p) {
+				if(p==o1.player) continue;  // ignore our value
+				v1= (o1.value>>(16*p))&0xFFFF;
+				if(v1==0) continue;   // ignore non eval'd players ==> TODO Change this value to -1 / 0xFFFF
+				v2= (o2.value>>(16*p))&0xFFFF;
+				if(v2==0) continue;
+
+				if(m1<v1) m1=v1;
+				if(m2<v2) m2=v2;
+			}
+			if(m1>m2) return -1;
+			if(m1<m2) return 1;
 			return 0;
 		}
 	};
-	static final public Comparator<Move> FIGHT_MIN_OTHERS= new Comparator<Move>()  {
+	static final public Comparator<Move> BEST_FIGHT_MIN_OTHERS= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
-			if(o2.value==Move.NaN) return -1; // put not eval'd last
-			if(o1.value==Move.NaN) return 1; // put not eval'd last
+			if(o1.value!=Move.NaN || o2.value!=Move.NaN) {
+				if(o1.value==Move.NaN) return 1; // put not eval'd last
+				if(o2.value==Move.NaN) return -1; // put not eval'd last
+			}			
+			long v1= (o1.value>>(16*o1.player))&0xFFFF;
+			long v2= (o2.value>>(16*o2.player))&0xFFFF;	
 
-			long v1= ((o1.value>>(16*o1.player))&0xFFFF);
-			long v2= ((o2.value>>(16*o2.player))&0xFFFF);	
-			
 			long min1=Long.MAX_VALUE;
-			long max1=Long.MIN_VALUE;
 			long min2=Long.MAX_VALUE;
-			long max2=Long.MIN_VALUE;
 			long v;
 			for(int p=0; p<4; ++p) {
 				if(p==o1.player) continue;
-				v= ((o1.value>>(16*p))&0xFFFF);
-				if(v!=0x7FFF) {
-					if(v<min1) min1=v;
-					if(v>max1) max1=v;
-				}
-				
-				v= ((o2.value>>(16*p))&0xFFFF);
-				if(v!=0x7FFF) {
-					if(v<min2) min2=v;
-					if(v>max2) max2=v;
-				}
+				v= (o1.value>>(16*p))&0xFFFF;
+				if(v<min1) min1=v;
+				v= (o2.value>>(16*p))&0xFFFF;
+				if(v<min2) min2=v;
 			}
-			v1-=min1;
-			v2-=min2;
+
+			if(min1<min2 && min1<v1) return -1;
+			if(min1>min2 && min2<v2) return 1;
+			
 			if(v1>v2) return -1;
 			if(v1<v2) return 1;
 
+			v1=v2=0;
+			for(int p=0; p<4; ++p) {
+				v1+= ((o1.value>>(16*p))&0xFFFF);
+				v2+= ((o2.value>>(16*p))&0xFFFF);
+			}
+			if(v1<v2) return -1;
+			if(v1>v2) return 1;
 			return 0;
 		}
 	};
-	static final public Comparator<Move> FIGHT_COMPARATOR= FIGHT_MIN_OTHERS;//FIGHT_MAX_ME;//
+	static final public Comparator<Move> BEST_FIGHT_FIRST= BEST_FIGHT_MIN_OTHERS;
 }
 final class Grid {
 	static public final int PLAYGROUND_WIDTH= 30;
@@ -820,7 +870,7 @@ final class Grid {
 	public int remainingPlayers;
 	public boolean[] alive= new boolean[] { false, false, false, false };
 	public int[] head= new int[4];
-	public int player= -1;	
+	public int player= -1;
 	public int nbMoves;
 	public LinkedList<LinkedList<Integer>> cycles= new LinkedList<>();
 	public LinkedList<Integer> moves= new LinkedList<>();
@@ -837,6 +887,8 @@ final class Grid {
 	 public short[] low= new short[AREA];
 	 public short[] num= new short[AREA];
 	 public short[] articd= new short[AREA];
+    // Statistics
+    static int counter=0;
 	public Grid() {
         this(0);
 	}
@@ -850,9 +902,11 @@ final class Grid {
 			grid[y*WIDTH+WIDTH-1]= 0x1;
 		}
 		setNbPlayers(nbPlayers);
+		++counter;
 	}
 	protected Grid(Grid src) {
 	    copy(src);
+		++counter;
 	}
 	final public Grid copy() {
 		return new Grid(this);
@@ -913,7 +967,6 @@ final class Grid {
 			cycles.add(new LinkedList<Integer>());
 		}
 		nbMoves=0;
-		moves.clear();
 		dirtyComponents=true;
 		dirtyArticulations=true;
 		dirtyTerritory=true;
@@ -936,8 +989,6 @@ final class Grid {
 				grid[idx]= 0;
 			}
 			dirtyComponents=true;
-			dirtyTerritory=true;
-			dirtyArticulations=true;
 		}
 	}
 	final private void resurectPlayer(final int p) {
@@ -949,8 +1000,6 @@ final class Grid {
 			head[p]= cycles.get(p).getLast();
 			++remainingPlayers;
 			dirtyComponents=true;
-			dirtyTerritory=true;
-			dirtyArticulations=true;
 		}
 	}
 	final public boolean move(final int p, final int xy) {
@@ -984,7 +1033,7 @@ final class Grid {
 			int xy= head[player];
 			grid[xy]= 0;
 			removeFromComponents(xy);
-			head[player]= cycles.get(player).isEmpty()?0:cycles.get(player).getLast();
+			head[player]= cycles.get(player).isEmpty()?-1:cycles.get(player).getLast();
 		}
 		player=(moves.isEmpty()?-1:moves.getLast());
 		dirtyArticulations=true;
@@ -1053,19 +1102,18 @@ final class Grid {
 		if(force) dirtyComponents=true;
 		calculateComponents();
 	}
-	static ListInt equiv= new ListInt(600);
 	final public void calculateComponents() {
 		if(!dirtyComponents) return;
 
+		List<Short> equiv= new ArrayList<>();
 		Arrays.fill(components, (short)0);
-		equiv.clear();
 		equiv.add((short)0);
 		short group=1;
 		int idx= FIRST;
-		for(; idx<=LAST; ++idx) {
+		for(idx= FIRST; idx<=LAST; ++idx) {
 			if(grid[idx]!=0) continue;
-			short up= (short)equiv.get(components[idx+Direction.UP.step]);
-			short left= (short)equiv.get(components[idx+Direction.LEFT.step]);
+			short up= equiv.get(components[idx+Direction.UP.step]);
+			short left= equiv.get(components[idx+Direction.LEFT.step]);
 			if(up==0 && left==0) {
 				// new component;
 				equiv.add(group);
@@ -1090,7 +1138,7 @@ final class Grid {
 		idx= FIRST;
 		for(int y=1; y<HEIGHT-1; ++y, idx+=2) {
 			for(int x=1; x<WIDTH-1; ++x, ++idx) {
-				short e= (short)equiv.get(components[idx]);
+				short e= equiv.get(components[idx]);
 				components[idx]=e;
 				cedges[e]+=degree(idx);
 				if(Cell.at(x,y)==Cell.RED) ++red[e]; else ++black[e];
@@ -1138,7 +1186,7 @@ final class Grid {
 		cedges[components[idx]] += 2 * degree(idx);
 		if (Cell.at(idx)==Cell.RED) ++red[components[idx]]; else ++black[components[idx]];
 	}	
-	final private void mergeEquiv(ListInt equiv, short oldGroup, short newGroup) {
+	final private void mergeEquiv(List<Short> equiv, short oldGroup, short newGroup) {
 		for(int t=0; t<equiv.size(); ++t) {
 			if(equiv.get(t)==oldGroup) equiv.set(t, newGroup);
 		}
@@ -1157,12 +1205,14 @@ final class Grid {
 		return cedges[components[idx]]; 
 	}
 	  // number of fillable squares in area when starting on 'startcolor' (assuming starting point is not included)
-	final private int fillableArea(int comp, Cell startColor) {
+	final private int fillableArea(int component, Cell startColor) {
 		  if(startColor==Cell.RED) { // start on red?  then moves are black-red-black-red-black (2 red, 3 black: 5; 3 red 3 black: 6; 4 red 3 black
-			  return 2*((red[comp]-1)<black[comp]?(red[comp]-1):black[comp])+(black[comp]>=red[comp]?1:0);			  
-		  } else { // moves are red-black-red-black-red
-			  return 2*(red[comp]<(black[comp]-1)?red[comp]:(black[comp]-1))+(red[comp]>=black[comp]?1:0);
-		  }
+			    return 2*(red[component]-1<black[component]? red[component]-1:black[component]) +
+			      (black[component] >= red[component] ? 1 : 0);
+			  } else { // moves are red-black-red-black-red
+			    return 2*(red[component]<black[component]-1? red[component]:black[component]-1) +
+			      (red[component] >= black[component] ? 1 : 0);
+			  }
 	  }	
 	//	Articulations
 	final public void resetArticulations() {
@@ -1217,14 +1267,14 @@ final class Grid {
 	final public void calculateTerritory(int p) {
 		if(alive[p]) calculateTerritory(head[p], p);
 	}
-	static ListInt current= new ListInt(1024);
-	static ListInt next= new ListInt(1024);
-	static ListInt temp;
 	final public void calculateTerritory(int xy, int player) {
+		ArrayDeque<Integer> current= new ArrayDeque<Integer>(10);
+		ArrayDeque<Integer> next= new ArrayDeque<Integer>(10);
+		ArrayDeque<Integer> temp;
 		dirtyTerritory=false;
+
 		short pID= (short) (1<<(12+player));
-		next.clear();
-		current.clear();
+		
 		next.add(xy);
 		territory[xy]=pID;
 		short dist=0;
@@ -1233,8 +1283,9 @@ final class Grid {
 			temp=current;
 			current= next;
 			next=temp;
+			
 			while(!current.isEmpty()) {
-				xy= current.remove();
+				xy= current.poll();
 				for(Direction d: Direction.ALL) {
 					int xyn= xy+d.step;
 					if(grid[xyn]!=0) continue;
@@ -1246,27 +1297,43 @@ final class Grid {
 					}
 				}
 			}
+			
 		} while(!next.isEmpty());
 	}
 }
 enum Cell {
 	BLACK(0), RED(1);
+
 	final int id;
-	private Cell(int id) { this.id=id; }
-	static final public Cell at(final int idx) { return ((idx ^ (idx>>5)) & 1)==1?RED:BLACK; }
-	static final public Cell at(final int x, final int y) { return ((x ^ y) & 1)==1?RED:BLACK; }
+	private Cell(int id) {
+		this.id=id;
+	}
+	
+	static final public Cell at(final int idx) {
+		return ((idx ^ (idx>>5)) & 1)==1?RED:BLACK;
+	}
+	
+	static final public Cell at(final int x, final int y) {
+		return ((x ^ y) & 1)==1?RED:BLACK;
+	}
 }
 enum Direction {
 	NONE(0), LEFT(-1), RIGHT(1), UP(-Grid.WIDTH), DOWN(Grid.WIDTH), ANY(0);
 	static final Direction[] ALL= new Direction[] { LEFT, UP, RIGHT, DOWN };
 	public final int step;
-	private Direction(int delta) { this.step= delta; }
+	private Direction(int delta) {
+		this.step= delta;
+	}
 	static final Direction fromTo(int xy0, int xy1) {
 		switch (xy1-xy0) {
-		case -1: return LEFT;
-		case 1: return RIGHT;
-		case Grid.WIDTH: return DOWN;
-		case -Grid.WIDTH: return UP;
+		case -1:
+			return LEFT;
+		case 1:
+			return RIGHT;
+		case Grid.WIDTH:
+			return DOWN;
+		case -Grid.WIDTH:
+			return UP;
 		}
 		return NONE;
 	}
@@ -1282,16 +1349,15 @@ enum Strategy {
 	NONE,FIGHT,TERRITORY,SURVIVAL,ADAPTATIVE;
 }
 final class Move {
-	static public final long NaN=0x7FFF7FFF7FFF7FFFL;//Long.MAX_VALUE;
+	static public final long NaN=Long.MAX_VALUE;
 	static public final long MAX=NaN-1;
 	static public final long MIN=-MAX;	
 	public int 		   player=-1;
-	public Direction dir= Direction.ANY;
+	public Direction[] dir= new Direction[] { Direction.ANY,Direction.ANY,Direction.ANY,Direction.ANY};
 	public long eval= NaN;
 	public long value= NaN;
 	public int degree= -1;
-	public int depth= 0;
-	public int maxDepth= 0;
+	public int depth= 1;
 	public Strategy strategy=Strategy.NONE;
 	public MoveList future= new MoveList();
 	public List<Integer> opponents;	
@@ -1299,7 +1365,7 @@ final class Move {
 	}
 	private Move(int player, Direction dir) {
 		this.player=player;
-		this.dir=dir;
+		this.dir[player]=dir;
 	}
 	final public int size() {
 		int s= future.size();
@@ -1319,16 +1385,34 @@ final class Move {
 			pendingPool.add(this);
 		}
 	}	
+	final public Move append(int player, Direction d) {
+		this.player=this.player==-1?player:this.player;
+		dir[player]=d;
+		return this;
+	}	
 	final public boolean match(Move other) {
-		if(dir==Direction.ANY || other.dir==Direction.ANY || dir==other.dir) return true;
-		return false;
+		for(int p=0; p<4; ++p) {
+			if(dir[p]==Direction.ANY || other.dir[p]==Direction.ANY) continue;
+			if(dir[p]!=other.dir[p]) return false;
+		}
+		return true;
 	}	
 	final public Grid move(Grid g) {
-		if(player!=-1 && dir!=Direction.ANY) g.move(player, dir);
+		if(player!=-1) {
+			int p=player;
+			do{
+				if(dir[p]!=Direction.ANY) g.move(p, dir[p]);
+			} while((p=(++p)%4)!=player);
+		}
 		return g;
 	}
 	final public Grid unmove(Grid g) {
-		if(player!=-1 && dir!=Direction.ANY) g.unmove();
+		if(player!=-1) {
+			for(int p=0; p<4; ++p) {
+				// We assume that the previous move was this one
+				if(dir[p]!=Direction.ANY) g.unmove();
+			}
+		}
 		return g;
 	}	
 	final public void reset() {
@@ -1336,12 +1420,11 @@ final class Move {
 	}
 	final public void reset(boolean immediate) {
 		player=-1;
-		dir= Direction.ANY;
+		for(int p=0; p<4; ++p) dir[p]= Direction.ANY;
 		eval=NaN;
 		value= NaN;
 		degree=-1;
-		depth=0;
-		maxDepth=0;
+		depth=1;
 		strategy=Strategy.NONE;
 		if(immediate) future.clear();
 		else while(!future.isEmpty()) future.remove().dispose(false);
@@ -1350,10 +1433,16 @@ final class Move {
 	final public String toString() {
 		if(player==-1) return "--";
 		StringBuffer bf= new StringBuffer();
-		if(dir.step!=0) {
-			bf.append("P").append(player).append("-").append(dir);
-			bf.append(" [ "+(value==NaN?"-":value)+" / "+(eval==NaN?"-":eval)+" ]");
-		}
+		boolean first=true;
+		int p=player;
+		do {
+			if(dir[p%4].step!=0) {
+				bf.append(first?"P":" P").append(p%4).append("-").append(dir[p%4]);
+				first=false;
+			}
+		} while((++p%4)!=player);
+		if(first) bf.append("--");
+		else bf.append(" [ "+(eval==NaN?"-":eval)+" / "+(value==NaN?"-":value)+" ]");
 		return bf.toString();
 	}
 	// Moves pool !!!
@@ -1361,14 +1450,13 @@ final class Move {
 	static MoveList pendingPool= new MoveList();
 	static final public Move get(Move src)  {
 		Move m= get();
+		System.arraycopy(src.dir, 0, m.dir, 0, 4);
 		m.player=src.player;
-		m.dir=src.dir;
 		m.eval= src.eval;
 		m.value= src.value;
 		m.degree= src.degree;
 		m.strategy= src.strategy;
 		m.depth= src.depth;
-		m.maxDepth= src.maxDepth;
 		m.opponents= src.opponents;
 		for(Move f: src.future) {
 			m.future.add(Move.get(f));
@@ -1380,8 +1468,14 @@ final class Move {
 	}
 	static final public Move get(int player, Direction d)  {
 		Move m= get();
+		m.dir[player]=d;
 		m.player=player;
-		m.dir=d;
+		return m;
+	}
+	static final public Move get(int player, Direction[] dir)  {
+		Move m= get();
+		m.player=player;
+		System.arraycopy(dir, 0, m.dir, 0, 4);
 		return m;
 	}
 	static final public Move get() {
@@ -1402,36 +1496,78 @@ final class Move {
 	}
 }
 final class MoveList extends LinkedList<Move> {
-	public final void clear() { while(!isEmpty()) remove().dispose(); }
+	public final void clear() {
+		while(!isEmpty()) remove().dispose();
+	}
 }
-class Watchdog {
-	static final Timeout timeoutEx= new Timeout();
-	public long _timeout;
-	public long _start;
-	public void start(long timeout) { _timeout= timeout; _start= System.currentTimeMillis(); }
-	public void check() throws Timeout { if(_timeout>0 && System.currentTimeMillis()-_start>=_timeout) throw timeoutEx; }
-	public boolean timeout() { return _timeout>0?(System.currentTimeMillis()-_start>=_timeout):false; }
-	public long elapsed() { return System.currentTimeMillis()-_start; }
+class Watchdog extends TimerTask {
+	static public Watchdog getInfinite() {
+		return new Watchdog() {
+			@Override
+			public void run() {}
+			@Override
+			public void check() {}
+		};
+	}
+	static final public Watchdog getDefault() {
+		return new Watchdog();
+	}
+	
+	static final Timeout timeout= new Timeout();
+	public boolean panic=false;
+	@Override
+	public void run() {
+		panic=true;
+	}
+	public void check() throws Timeout {
+		if(panic) throw timeout;
+	}
 }
-final class Timeout extends Exception {}
+final class Timeout extends Exception {
+}
 final class Space {
 	int red, black, edges, front;
 	Space() {}
-	Space(Space o) { red=o.red;	black=o.black; edges=o.edges; front=o.front; }
-	Space(int r, int b, int e, int f) { red= r; black= b; edges= e; front= f; }
-	final Space add(Space o) { red+=o.red; black+=o.black; edges+=o.edges; front+=o.front; return this; }
-	final Space add(int xy) { if(Cell.at(xy)==Cell.RED) ++red; else ++black; return this; }
+	Space(Space o) {
+		red= o.red;
+		black= o.black;
+		edges= o.edges;
+		front= o.front;
+	}
+	Space(int r, int b, int e, int f) {
+		red= r;
+		black= b;
+		edges= e;
+		front= f;
+	}
+	final Space add(Space o) {
+		red+= o.red;
+		black+= o.black;
+		edges+= o.edges;
+		front+= o.front;
+		return this;
+	}
+	final Space add(int xy) {
+		if(Cell.at(xy)==Cell.RED) 
+			++red; 
+		else 
+			++black;
+		return this;
+	}
 	final Space add(Cell startcell, int length) {
 		final int half= length>>1;
-		if (startcell==Cell.RED) { red+=length-half; black+=half;
-		} else { black+=length-half; red+=half; }
+		if (startcell==Cell.RED) {
+			red+=length-half;
+			black+=half;
+		} else {
+			black+=length-half;
+			red+=half;
+		}
 		return this;
 	}
 	final int fillable(Cell startcell) {
 		if(red==0 && black==0) return 0;
-		if (startcell==Cell.RED) 
-		  return 2*((red-1)<black?(red-1):black)+(black>=red?1:0);			  
-	   else  // moves are red-black-red-black-red
-		  return 2*(red<(black-1)?red:(black-1))+(red>=black?1:0);
+		if (startcell==Cell.RED) return 2*(red-1<black?red-1:black)+(black>=red?1:0);
+		else return 2*(red<black-1?red:black-1)+(red>=black?1:0);
 	}
 }

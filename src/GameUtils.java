@@ -168,9 +168,9 @@ public class GameUtils {
 	static public Game loadGame(InputStream in) throws IOException {
 		return loadGame(new InputStreamReader(in));
 	}	
-	static public Game loadGameRaw(Reader in) throws IOException {
+	static public JSONObject loadJsonGame(Reader in) throws IOException {
 		JSONParser parser= new JSONParser();
-		JSONObject jsonGame;
+		JSONObject jsonGame=null;
 		PushbackReader bin= new PushbackReader(in);
 		int c;
 		// Skip header comments
@@ -186,39 +186,7 @@ public class GameUtils {
 		} catch (ParseException e) {
 			throw new IOException("Failed to parse input", e);
 		}
-		JSONArray playersAgents= (JSONArray) jsonGame.get("playersAgents");
-		int nbPlayers= playersAgents.size();
-		Grid g= new Grid(nbPlayers);
-		JSONObject gameResult= (JSONObject) jsonGame.get("gameResult");
-		String uinput= (String) gameResult.get("uinput");
-		Scanner inputScanner= new Scanner(uinput);
-		inputScanner.useDelimiter("[)(,]+");
-		for(int p=0; p<nbPlayers; ++p) {
-			int x= inputScanner.nextInt()+1;
-			int y= inputScanner.nextInt()+1;
-			g.move(p, y*32+x);
-		}
-		
-		JSONArray outputs= (JSONArray) gameResult.get("outputs");
-		for(int t=1; t<outputs.size(); ++t) {
-			String dirString= (String) outputs.get(t);
-			Direction d= Direction.parse(dirString.trim());
-			System.out.println("P"+g.nextPlayer()+"-"+d);
-			g.move(g.nextPlayer(), d);
-		}
-		List<PlayerAgent> playersInfo= new ArrayList<>(nbPlayers);
-		for(int p=0; p<g.nbPlayers; ++p) {
-			PlayerAgent playerInfo= new PlayerAgent();
-			JSONObject player= (JSONObject) playersAgents.get(p);
-			playerInfo.name= player.containsKey("name")?(String)player.get("name"):"Player"+p;
-			playerInfo.rank= player.containsKey("rank")?((Long)player.get("rank")).intValue():0;
-			playerInfo.score= player.containsKey("score")?((Double)player.get("score")).floatValue():0;
-			playerInfo.language= player.containsKey("language")?(String)player.get("language"):"Java";
-			playersInfo.add(playerInfo);
-		}
-		
-		
-		return new Game(g,playersInfo);
+		return jsonGame;
 	}
 	
 	static public Game loadGame(Reader in) throws IOException {
@@ -285,50 +253,4 @@ public class GameUtils {
 		return new Game(g,playersInfo);
 	}
 	
-	static {
-		/* Chargement du driver JDBC pour MySQL */
-		try {
-		    Class.forName( "com.mysql.jdbc.Driver" );
-		} catch ( ClassNotFoundException e ) {
-		    /* Gérer les éventuelles erreurs ici. */
-		}
-	}
-	
-	public static void main(String[] args) throws FileNotFoundException, IOException {
-		
-		
-		Game g= loadGameRaw(new FileReader("grids-raw/602075-20141204-041620/20812828.json"));
-		DumpUtils.dump(g.grid);
-
-		/* Connexion à la base de données */
-		String url = "jdbc:mysql://localhost:3306/tron";
-		String utilisateur = "tron";
-		String motDePasse = "Jslsmab00";
-		Connection connexion = null;
-		try {
-		    connexion = DriverManager.getConnection( url, utilisateur, motDePasse );
-
-
-		    /* Création de l'objet gérant les requêtes */
-		    Statement statement = connexion.createStatement();
-		    
-		    /* Exécution d'une requête de lecture */
-		    ResultSet resultat = statement.executeQuery( "SELECT id, email, mot_de_passe, nom  FROM Utilisateur;" );
-		    
-		    
-		} catch ( SQLException e ) {
-		    /* Gérer les éventuelles erreurs ici */
-		} finally {
-		    if ( connexion != null )
-		        try {
-		            /* Fermeture de la connexion */
-		            connexion.close();
-		        } catch ( SQLException ignore ) {
-		            /* Si une erreur survient lors de la fermeture, il suffit de l'ignorer. */
-		        }
-		}
-		
-		
-		
-	}
 }
