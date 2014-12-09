@@ -158,8 +158,8 @@ final class IA {
 	public static int ab_runs;
 	public static int ab_evals;
 	public static int ab_cutoffs;
-	static final int K1= 55;
-	static final int K2= 194;
+	static final int K1= 5; //55;
+	static final int K2= 19; //194;
 	final static public Move nextMoveFight(Move present, final Grid grid, final int forPlayer, final LinkedList<Integer> opponents, final int maxDepth, final Watchdog dog) {
 		// original grid must have been copied before calling this method as it will be messed up during processing
 		boolean dirty=present.strategy!=Strategy.FIGHT;
@@ -264,7 +264,7 @@ final class IA {
 			if(!g.alive[p]) { eval_maxn[p]=0; continue; }
 			ccount= max_articulated_space(g, g.head[p], g.territory);
 			dog.check();
-			eval_maxn[p]= ccount.fillable(Cell.at(g.head[p])); //K1*ccount.fillable(Cell.at(g.head[p]))+K2*ccount.edges; //
+			eval_maxn[p]= K1*ccount.fillable(Cell.at(g.head[p]))+K2*ccount.edges; //ccount.fillable(Cell.at(g.head[p])); //
 //			total+=eval_maxn[p];
 		}
 
@@ -750,7 +750,7 @@ final class IA {
 			return 0;
 		}
 	};
-	static final public Comparator<Move> FIGHT_MAX_ME= new Comparator<Move>()  {
+	static final public Comparator<Move> FIGHT_MAX= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
@@ -766,7 +766,7 @@ final class IA {
 			return 0;
 		}
 	};
-	static final public Comparator<Move> FIGHT_MIN_OTHERS= new Comparator<Move>()  {
+	static final public Comparator<Move> FIGHT_MAX_MIN= new Comparator<Move>()  {
 		@Override
 		final public int compare(Move o1, Move o2) {
 			// Compare values
@@ -803,7 +803,44 @@ final class IA {
 			return 0;
 		}
 	};
-	static final public Comparator<Move> FIGHT_COMPARATOR= FIGHT_MIN_OTHERS;//FIGHT_MAX_ME;//
+	static final public Comparator<Move> FIGHT_MIN_MAX= new Comparator<Move>()  {
+		@Override
+		final public int compare(Move o1, Move o2) {
+			// Compare values
+			if(o2.value==Move.NaN) return -1; // put not eval'd last
+			if(o1.value==Move.NaN) return 1; // put not eval'd last
+
+			long v1= ((o1.value>>(16*o1.player))&0xFFFF);
+			long v2= ((o2.value>>(16*o2.player))&0xFFFF);	
+			
+			long min1=Long.MAX_VALUE;
+			long max1=Long.MIN_VALUE;
+			long min2=Long.MAX_VALUE;
+			long max2=Long.MIN_VALUE;
+			long v;
+			for(int p=0; p<4; ++p) {
+				if(p==o1.player) continue;
+				v= ((o1.value>>(16*p))&0xFFFF);
+				if(v!=0x7FFF) {
+					if(v<min1) min1=v;
+					if(v>max1) max1=v;
+				}
+				
+				v= ((o2.value>>(16*p))&0xFFFF);
+				if(v!=0x7FFF) {
+					if(v<min2) min2=v;
+					if(v>max2) max2=v;
+				}
+			}
+			v1=max1-v1;
+			v2=max2-v2;
+			if(v1<v2) return -1;
+			if(v1>v2) return 1;
+
+			return 0;
+		}
+	};
+	static final public Comparator<Move> FIGHT_COMPARATOR= FIGHT_MAX_MIN;//FIGHT_MAX_MIN;//FIGHT_MAX;//
 }
 final class Grid {
 	static public final int PLAYGROUND_WIDTH= 30;
